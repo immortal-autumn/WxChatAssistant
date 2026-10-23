@@ -199,6 +199,7 @@ func nativeCommand(ctx context.Context, store Store, command string, args []stri
 			result := map[string]any{"backend": "native", "logged_in": state.Account != nil}
 			if state.Account != nil {
 				result["username"] = state.Account.Username
+				result["profile"] = state.Account.Profile
 				result["host"] = state.Account.Host
 			}
 			return json.NewEncoder(os.Stdout).Encode(result)
@@ -245,9 +246,19 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	png := f.String("qr", "", "also save the native QR as PNG")
 	timeout := f.Duration("timeout", 8*time.Minute, "overall login timeout")
 	resume := f.Bool("resume", false, "resume the saved QR/approval attempt")
+	profile := f.String("profile", native.DesktopProfile, "desktop or experimental android-tablet (use a separate --config-dir)")
 	if err := parse(f, args); err != nil {
 		return err
 	}
+	if *profile != native.DesktopProfile && *profile != native.AndroidTabletProfile {
+		return errors.New("profile must be desktop or android-tablet")
+	}
+	profileExplicit := false
+	f.Visit(func(v *flag.Flag) {
+		if v.Name == "profile" {
+			profileExplicit = true
+		}
+	})
 	if *timeout <= 0 {
 		return errors.New("timeout must be positive")
 	}
@@ -278,6 +289,16 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 			return err
 		}
 		host = attempt.Host
+		storedProfile := attempt.Profile
+		if storedProfile == "" {
+			storedProfile = native.DesktopProfile
+		}
+		if profileExplicit && storedProfile != *profile {
+			return errors.New("saved login uses a different profile; start a fresh login or use its matching --profile")
+		}
+		if storedProfile != native.DesktopProfile && storedProfile != native.AndroidTabletProfile {
+			return errors.New("unsupported saved login profile")
+		}
 		if time.Now().Unix()-attempt.Created > 900 {
 			return errors.New("saved QR expired; run login without --resume")
 		}
@@ -288,7 +309,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	}
 	defer connection.Close()
 	if attempt == nil {
-		attempt, err = connection.StartLogin(ctx, host)
+		attempt, err = connection.StartLoginWithProfile(ctx, host, *profile)
 		if err != nil {
 			return err
 		}
@@ -296,9 +317,17 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 			return err
 		}
 	}
-	fmt.Fprintln(os.Stderr, "Native desktop login uses your desktop session and can log out another computer.\nApprove WeChat CLI on your phone to continue.")
+	if attempt.Profile == native.AndroidTabletProfile {
+		fmt.Fprintln(os.Stderr, "Experimental Android tablet login. Desktop coexistence and device verification are not yet validated.\nApprove WeChat CLI on your phone to test it.")
+	} else {
+		fmt.Fprintln(os.Stderr, "Native desktop login uses your desktop session and can log out another computer.\nApprove WeChat CLI on your phone to continue.")
+	}
 	if attempt.Status != 2 {
-		content := "data:image/png;base64," + base64.StdEncoding.EncodeToString(attempt.Image)
+		mime := "image/png"
+		if len(attempt.Image) > 0 && attempt.Image[0] == 0xff {
+			mime = "image/jpeg"
+		}
+		content := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(attempt.Image)
 		if err = displayLoginQR(ctx, newClient(defaultBaseURL, "").HTTP, os.Stderr, QRCode{Content: content}, *png); err != nil {
 			return err
 		}

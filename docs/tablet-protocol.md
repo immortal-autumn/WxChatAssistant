@@ -1,10 +1,11 @@
 # Android tablet / iPad protocol investigation
 
 Investigated 2026-10-23 to find a standalone login mode that can potentially
-coexist with an official desktop session. **A real Android tablet login mode
-exists in the inspected official APK. Standalone tablet authentication and
-three-device coexistence have not been live verified here.** The CLI still uses
-the Linux desktop profile; there is no working `--tablet` switch yet.
+coexist with an official desktop session. **An experimental standalone Android tablet profile now works on the tested
+account.** The user approved login and reported that the other clients remained
+signed in. Native sync and one user-authorized text send also succeeded. The
+default profile remains Linux desktop; select tablet explicitly in a separate
+config directory as shown below.
 
 ## Official Android artifact
 
@@ -34,9 +35,15 @@ foldable/tablet detection affect which branch is selected.
 
 The exported native setter is at ELF virtual address `0x7c194`, branching to
 `0x7743c`. The latter stores the supplied integer in a global at `0xe8028`.
-This confirms a separate native setting in addition to the protobuf device
-string. Its complete use in packet packing has not yet been traced; these
-addresses are not an implementation of the tablet wire format.
+The global is referenced through GOT relocation `0xe3ac8`. Packing code at
+`0x5c1a4` loads it and calls `0x5ffe4`, which writes the 16-bit device field at
+packet-object offset 47. Serialization passes the object plus 8 bytes to the
+header writer; at `0x65760` the writer loads that field at relative offset 39
+and writes it as a varint. This identifies the device-type header slot after
+the key-version field. The existing desktop reference called that slot
+`cert_version`; treating it as an unrelated certificate selector was
+misleading. The Go tablet profile now writes 28 there, rather than changing
+only the protobuf device string.
 
 `com.tencent.mm.ui.j9.a()` has a separate local Lenovo TB-9707F model check.
 That helper is **not** the entire tablet selection policy.
@@ -100,7 +107,7 @@ The UI polls, decrypts the notification using the QR notify key through
 `MMProtocalJni.aesDecrypt`, and handles notification status 2 by passing the two
 phone-issued strings to the authentication scene. These are temporary approval
 credentials, rather than a request for the user's ordinary account password.
-The exact native authentication/risk-data construction still needs tracing.
+The exact native risk-data construction still needs tracing. The minimal Go phone-grant exchange has nevertheless succeeded in the live experiment below.
 
 Important differences from the current Linux implementation:
 
@@ -144,31 +151,68 @@ it exposes the official current secondary-device UI, policy check, request
 serializers, and native libraries. This investigation does not establish a
 current iPad binary's exact packet format.
 
-## Consequences for this Go CLI
+## Go implementation and live experiment
 
-Android-tablet mode is a credible route to investigate for desktop coexistence.
-The presence of a separate device class and secondary-device UI is strong
-implementation evidence; **the session-slot policy for this account remains a
-live-test question**. Phone-plus-tablet operation alone does not prove that the
-same account can simultaneously retain its desktop session.
+```sh
+# Account-free QR request and one polling request; no authentication:
+go run ./tools/native-probe --profile android-tablet --qr /tmp/tablet.png --poll
 
-The next implementation needs to:
+# Phone-approved login, with isolated local account state:
+go build -o bin/wechat .
+./bin/wechat --config-dir ~/.config/wechat-tablet login --profile android-tablet
+./bin/wechat --config-dir ~/.config/wechat-tablet read --json
+./bin/wechat --config-dir ~/.config/wechat-tablet history --limit 50
+```
 
-1. Model protocol profiles per attempt and saved account, including version,
-   device type, packet policy, keys, and timestamps. Keep the working desktop
-   account and cursor separate from a tablet attempt.
-2. Trace native packing for device ID 28, Android pre-login key handling, and the
-   opaque QR/auth metadata. Add verified request/response fixtures before
-   advertising a tablet login command.
-3. Exercise account-free eligibility/QR calls with correct envelopes and
-   authenticated server verification. A QR response alone would not establish
-   successful tablet authorization.
-4. Perform one phone-approved tablet login while an official desktop session is
-   active, then verify incoming sync on both and restart behavior. Observe
-   actual session displacement rather than inferring coexistence from labels.
+Live results on 2026-10-23:
 
-No tablet QR was approved, no current credentials were modified, and no message
-was sent during this investigation. The existing `wechat login` behavior is unchanged.
+1. An authenticated MMTLS session accepted a QR request with version
+   `0x28004f30`, protobuf device type `pad-android-34`, and header device ID 28.
+   The verified response contained a 3,691-byte QR image. One polling request
+   with full Unix seconds returned the unscanned state, status zero.
+2. The user ran the CLI themselves and approved the tablet QR. Authentication
+   completed, following the regional redirect to `sglong.wechat.com`. The user
+   reported that their other clients remained signed in. We did not automate
+   or instrument those other clients to verify their session state.
+3. The tablet account synchronized **496 entries across 27 peer/conversation
+   IDs**, including **121 text messages**. Other entries included images,
+   stickers, app payloads, video, and system/status events. These counts do not
+   imply that all 496 entries were ordinary chat messages. This was a fresh
+   tablet cursor, separate from the earlier desktop cursor.
+4. At the user's explicit request, a single test text was sent to a uniquely
+   matched contact from the private synchronized contact records. The server
+   returned a successful item receipt, matching recipient and client ID, plus
+   a nonzero server message ID. No automatic send retry was performed.
+   Server acceptance does not establish delivery or a read receipt.
+
+No message contents, recipient identifiers, approval grants, or account keys
+are included in this report or repository.
+
+The implementation saves a protocol profile with each login attempt and
+account. It uses profile-specific BaseRequest values, native header device
+IDs, account request versions, sync device strings, and poll timestamps.
+Existing state without a profile continues to use the original desktop
+settings. Explicit resume/profile mismatches are rejected. Desktop and tablet
+credentials/cursors remain isolated by `--config-dir`.
+
+The experiment reused the existing signed ECDH business envelope and pinned
+MMTLS transport; the server accepted them for this profile. The Java RSA
+settings observed in the APK do not establish that this alternative verified
+hybrid path is invalid. We did not forge Android risk/attestation data: the
+opaque QR field 11 and fingerprint/device-token initialization were omitted.
+They may still be required for other accounts or future server policies.
+
+The account-free probe never saves account credentials or completes login.
+The user-approved CLI login does. `read`, `history`, and `send` use the saved
+profile automatically when pointed at the same config directory. The tablet
+profile currently requires modern 24-byte account request/response keys; there
+is no legacy CBC account-key fallback.
+
+Remaining gaps include account-specific verification challenges, complete
+Android risk metadata, automatic authorization renewal/reconnect, media
+transfer, and complete history retrieval. Coexistence is an observation on one
+account, rather than a universal server-policy guarantee. The working desktop
+backend remains available and its default behavior has not changed.
 
 ## Reproduce the static inspection
 

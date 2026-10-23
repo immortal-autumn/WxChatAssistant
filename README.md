@@ -2,7 +2,7 @@
 
 A standalone Go CLI for personal WeChat messages using the native desktop protocol. No WeChat desktop process, OpenClaw, Rust daemon, or bridge service is required. The original iLink/ClawBot backend remains available with `--backend ilink`.
 
-**Experimental:** native login occupies a desktop session and can log out another computer using the same account. Coexistence with another desktop client is not implemented. See the [Android tablet investigation](docs/tablet-protocol.md) for the separate device mode being researched. Authentication and initial sync have succeeded on a real account; outgoing delivery has not yet been live tested.
+**Experimental:** the default desktop profile can log out another computer using the same account. The new Android tablet profile completed login and message sync, and the user reported that the other clients stayed signed in. One explicitly authorized text send also returned server acceptance; recipient delivery/read status was not independently checked. See the [tablet investigation and live results](docs/tablet-protocol.md).
 
 ## Build
 
@@ -16,6 +16,19 @@ go build -o bin/wechat .
 ```
 
 ## Use
+
+To try the Android tablet profile while retaining your existing desktop CLI state:
+
+```sh
+./bin/wechat --config-dir ~/.config/wechat-tablet login --profile android-tablet
+./bin/wechat --config-dir ~/.config/wechat-tablet read --follow
+./bin/wechat --config-dir ~/.config/wechat-tablet history --limit 50
+./bin/wechat --config-dir ~/.config/wechat-tablet send --to 'RECIPIENT_ID' --text 'Hello!'
+```
+
+The saved account remembers its protocol profile, so subsequent commands only need the same config directory. To resume a tablet QR attempt, use `login --resume --profile android-tablet` in that directory. Coexistence has been observed on one account; it is not guaranteed for every account or device combination.
+
+For the default desktop profile:
 
 ```sh
 # Scan the terminal QR and approve on your phone.
@@ -41,7 +54,7 @@ printf 'A multiline\nmessage\n' | ./bin/wechat send --to 'RECIPIENT_ID' --stdin
 
 `read --json` and `history` output one decoded message per JSON line. Messages include server ID, sender, recipient, peer, message type, content, timestamp, and direction. Non-text content may contain raw XML or other native payload text; media downloading and rich formatting are not implemented. `contacts` lists peer IDs observed in the local archive, rather than fetching a complete address book.
 
-**History scope:** first-login sync can return existing messages. Our first approved account synchronized 503 messages. This does not establish that all conversations or all historical messages are available. `history` only reads this CLI's local archive. Phone migration/backup and official desktop database import are not implemented.
+**History scope:** first-login sync can return existing messages. The first desktop login synchronized 503 entries. The tablet login synchronized 496 entries, including 121 text messages; other entries included media and system events. This does not establish that all conversations or all historical messages are available. `history` only reads this CLI's local archive. Phone migration/backup and official desktop database import are not implemented.
 
 The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. A saved temporary QR/approval can be resumed with `login --resume` until it expires. New-device phone/LAN verification challenges are detected but not implemented.
 
@@ -73,4 +86,4 @@ go test -race ./...
 go vet ./...
 ```
 
-Tests cover authenticated transport records, encrypted business fixtures, phone approval/challenge handling, cursor merge/reset, send-receipt identity matching, unknown sync payload retention, private archive permissions, replay deduplication, and separation from bot credentials. Existing iLink HTTP and QR image/rendering tests remain in place. Live tests have verified native QR login and account synchronization; no outgoing message was sent during implementation.
+Tests cover authenticated transport records, encrypted business fixtures, phone approval/challenge handling, cursor merge/reset, send-receipt identity matching, unknown sync payload retention, private archive permissions, replay deduplication, and separation from bot credentials. Existing iLink HTTP and QR image/rendering tests remain in place. Live tests verified desktop and tablet QR login, account synchronization, and server acceptance of one user-authorized outgoing tablet text message.

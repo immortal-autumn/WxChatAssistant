@@ -11,14 +11,11 @@ import (
 	"time"
 )
 
-const deviceType = "UnifiedPCLinux x86_64"
-
-var clientVersion int64 = -227271398
-
 // LoginAttempt includes temporary approval material. Serialize it only to a
 // private local state file, never to logs or ordinary command output.
 type LoginAttempt struct {
 	Host        string `json:"host"`
+	Profile     string `json:"profile,omitempty"`
 	Device      []byte `json:"device"`
 	Image       []byte `json:"image"`
 	Identifier  []byte `json:"identifier"`
@@ -30,9 +27,6 @@ type LoginAttempt struct {
 	Credential4 []byte `json:"credential_4,omitempty"`
 }
 
-func baseRequest(device []byte, uin, task uint64) []byte {
-	return message(pb(1, []byte{0}), pv(2, uin), pb(3, device), pv(4, uint64(clientVersion)), pb(5, []byte(deviceType)), pv(6, task))
-}
 func baseCode(data []byte) (int32, error) {
 	base, err := getBytes(data, 1)
 	if err != nil {
@@ -84,18 +78,31 @@ func optionalBuffer(data []byte, number uint64) ([]byte, error) {
 }
 
 func (s *Session) StartLogin(ctx context.Context, host string) (*LoginAttempt, error) {
+	return s.StartLoginWithProfile(ctx, host, DesktopProfile)
+}
+
+// StartLoginWithProfile starts an isolated experimental tablet or desktop attempt.
+func (s *Session) StartLoginWithProfile(ctx context.Context, host, name string) (*LoginAttempt, error) {
+	p, err := profileFor(name)
+	if err != nil {
+		return nil, err
+	}
 	device, err := randomBytes(16)
 	if err != nil {
 		return nil, err
 	}
-	device = []byte("l" + hex.EncodeToString(device))
-	device = device[:16]
+	if p.name == DesktopProfile {
+		device = []byte("l" + hex.EncodeToString(device))
+		device = device[:16]
+	} else {
+		device[0] = 0x49
+	}
 	key, err := randomBytes(16)
 	if err != nil {
 		return nil, err
 	}
-	request := message(pb(1, baseRequest(device, 0, 0)), pb(2, buffer(key)), pv(3, 0), pb(4, []byte("WeChat CLI")))
-	response, cookie, err := s.prelogin(ctx, 232, 502, request, nil)
+	request := message(pb(1, p.baseRequest(device, 0, 0)), pb(2, buffer(key)), pv(3, 0), pb(4, []byte("WeChat CLI")))
+	response, cookie, err := s.preloginWithProfile(ctx, p, 232, 502, request, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +113,8 @@ func (s *Session) StartLogin(ctx context.Context, host string) (*LoginAttempt, e
 	if err != nil {
 		return nil, err
 	}
-	if len(image) < 8 || !bytes.Equal(image[:8], []byte("\x89PNG\r\n\x1a\n")) {
-		return nil, errors.New("native login returned no PNG QR")
+	if len(image) < 8 || (!bytes.Equal(image[:8], []byte("\x89PNG\r\n\x1a\n")) && !bytes.Equal(image[:3], []byte{0xff, 0xd8, 0xff})) {
+		return nil, errors.New("native login returned no PNG/JPEG QR")
 	}
 	id, err := getBytes(response, 3)
 	if err != nil {
@@ -120,7 +127,7 @@ func (s *Session) StartLogin(ctx context.Context, host string) (*LoginAttempt, e
 	if len(id) == 0 || len(id) > 4096 || len(notify) != 16 {
 		return nil, errors.New("invalid native QR state")
 	}
-	return &LoginAttempt{Host: host, Device: device, Image: image, Identifier: id, NotifyKey: notify, Cookie: cookie, Created: time.Now().Unix()}, nil
+	return &LoginAttempt{Host: host, Profile: p.name, Device: device, Image: image, Identifier: id, NotifyKey: notify, Cookie: cookie, Created: time.Now().Unix()}, nil
 }
 func (s *Session) ProbeQRCode() ([]byte, error) {
 	attempt, err := s.StartLogin(context.Background(), "long.weixin.qq.com")
@@ -215,9 +222,13 @@ func (s *Session) PollLogin(ctx context.Context, a *LoginAttempt) error {
 	if err != nil {
 		return err
 	}
-	timestamp := (uint64(time.Now().UnixMilli()) & 0xffffffff) / 1000
-	request := message(pb(1, baseRequest(a.Device, 0, 0)), pb(2, buffer(key)), pb(3, a.Identifier), pv(4, timestamp), pv(5, 0))
-	response, cookie, err := s.prelogin(ctx, 233, 503, request, a.Cookie)
+	p, err := profileFor(a.Profile)
+	if err != nil {
+		return err
+	}
+	timestamp := p.pollTimestamp(time.Now())
+	request := message(pb(1, p.baseRequest(a.Device, 0, 0)), pb(2, buffer(key)), pb(3, a.Identifier), pv(4, timestamp), pv(5, 0))
+	response, cookie, err := s.preloginWithProfile(ctx, p, 233, 503, request, a.Cookie)
 	if err != nil {
 		return fmt.Errorf("native poll transport: %w", err)
 	}

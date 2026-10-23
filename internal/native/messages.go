@@ -35,10 +35,11 @@ func (s *Session) authenticated(ctx context.Context, a *Account, command uint32,
 	if err != nil {
 		return nil, err
 	}
-	header := binary.BigEndian.AppendUint32(nil, uint32(clientVersion))
+	p, _ := profileFor(a.Profile)
+	header := binary.BigEndian.AppendUint32(nil, uint32(p.version))
 	header = binary.BigEndian.AppendUint32(header, a.UIN)
 	header = append(header, a.Cookie...)
-	for _, v := range []uint64{cgi, uint64(len(plain)), uint64(len(plain)), 0, 39, uint64(businessChecksum(a.UIN, plain))} {
+	for _, v := range []uint64{cgi, uint64(len(plain)), uint64(len(plain)), 0, p.deviceID, uint64(businessChecksum(a.UIN, plain))} {
 		header = binary.AppendUvarint(header, v)
 	}
 	seq, err := randomBytes(2)
@@ -271,7 +272,11 @@ func (s *Session) Sync(ctx context.Context, a *Account, cursor []byte) (SyncBatc
 	if len(cursor) > 65536 {
 		return SyncBatch{}, errors.New("native cursor too large")
 	}
-	request := message(pb(1, pv(1, 0)), pv(2, 7), pb(3, buffer(cursor)), pv(4, 6), pb(5, []byte(deviceType)), pv(9, 0))
+	p, err := profileFor(a.Profile)
+	if err != nil {
+		return SyncBatch{}, err
+	}
+	request := message(pb(1, pv(1, 0)), pv(2, 7), pb(3, buffer(cursor)), pv(4, 6), pb(5, []byte(p.deviceType)), pv(9, 0))
 	response, err := s.authenticated(ctx, a, 121, 138, request)
 	if err != nil {
 		return SyncBatch{}, err

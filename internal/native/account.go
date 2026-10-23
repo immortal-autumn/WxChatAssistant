@@ -13,6 +13,7 @@ import (
 // unrelated to the iLink token and never loads a desktop app's private files.
 type Account struct {
 	Host        string `json:"host"`
+	Profile     string `json:"profile,omitempty"`
 	Device      []byte `json:"device"`
 	UIN         uint32 `json:"uin"`
 	Username    string `json:"username"`
@@ -25,6 +26,11 @@ type Account struct {
 }
 
 func (a *Account) Validate() error {
+	if a != nil {
+		if _, err := profileFor(a.Profile); err != nil {
+			return err
+		}
+	}
 	if a == nil || !validHost(a.Host) || len(a.Device) != 16 || a.UIN == 0 || a.Username == "" || len(a.Username) > 512 || len(a.Cookie) > 15 || len(a.RequestKey) != 24 || len(a.ResponseKey) != 24 {
 		return errors.New("invalid or unsupported native session")
 	}
@@ -77,6 +83,10 @@ func (s *Session) Authenticate(ctx context.Context, attempt *LoginAttempt) (*Acc
 	if attempt == nil || attempt.Status != 2 || len(attempt.Credential3) == 0 || len(attempt.Credential4) == 0 {
 		return nil, errors.New("native QR has not been approved")
 	}
+	p, err := profileFor(attempt.Profile)
+	if err != nil {
+		return nil, err
+	}
 	private, x, y, err := elliptic.GenerateKey(elliptic.P224(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -89,10 +99,10 @@ func (s *Session) Authenticate(ctx context.Context, attempt *LoginAttempt) (*Acc
 	}
 	rsa := message(pb(1, buffer(key)), pb(2, message(pv(1, 713), pb(2, buffer(public)))), pb(3, attempt.Credential3), pb(4, attempt.Credential4), pb(5, nil))
 	wt := message(pb(1, nil), pb(4, buffer([]byte{0})))
-	aes := message(pb(1, baseRequest(attempt.Device, 0, 1)), pb(2, pb(2, wt)), pv(5, 0), pb(8, []byte("WeChat CLI")), pb(9, []byte(deviceType)), pb(11, nil), pv(13, 1000), pb(19, []byte("0")), pv(22, 2))
+	aes := message(pb(1, p.baseRequest(attempt.Device, 0, 1)), pb(2, pb(2, wt)), pv(5, 0), pb(8, []byte("WeChat CLI")), pb(9, []byte(p.deviceType)), pb(11, nil), pv(13, 1000), pb(19, []byte("0")), pv(22, 2))
 	request := message(pb(1, rsa), pb(2, aes))
 	for redirects := 0; redirects < 2; redirects++ {
-		response, cookie, err := s.prelogin(ctx, 433, 252, request, attempt.Cookie)
+		response, cookie, err := s.preloginWithProfile(ctx, p, 433, 252, request, attempt.Cookie)
 		if err != nil {
 			return nil, err
 		}
@@ -122,6 +132,7 @@ func (s *Session) Authenticate(ctx context.Context, attempt *LoginAttempt) (*Acc
 		if err != nil {
 			return nil, err
 		}
+		account.Profile = p.name
 		clear(attempt.Credential3)
 		clear(attempt.Credential4)
 		attempt.Credential3 = nil

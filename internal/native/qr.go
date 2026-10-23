@@ -180,7 +180,7 @@ func openEnvelope(data, key, aad []byte) ([]byte, error) {
 
 // prelogin performs a signed native business exchange. As in the successful
 // account-free probe, notice checksums are currently zero; rejection is final.
-func (s *Session) prelogin(ctx context.Context, command uint32, cgi uint64, plain, cookie []byte) ([]byte, []byte, error) {
+func (s *Session) preloginWithProfile(ctx context.Context, p protocolProfile, command uint32, cgi uint64, plain, cookie []byte) ([]byte, []byte, error) {
 	pin, ok := businessPins[s.Region]
 	if !ok {
 		return nil, nil, errors.New("unsupported native business region")
@@ -220,12 +220,7 @@ func (s *Session) prelogin(ctx context.Context, command uint32, cgi uint64, plai
 		return nil, nil, err
 	}
 	request := message(pv(1, 1), pb(2, message(pv(1, 415), pb(2, public))), pb(3, token), pb(4, nil), pb(5, encrypted))
-	header := make([]byte, 8)
-	header = append(header, cookie...)
-	for _, v := range []uint64{uint64(cgi), uint64(len(plain)), uint64(len(plain)), pin.version, 0, 0} {
-		header = binary.AppendUvarint(header, v)
-	}
-	header = append(header, 0xff, 0, 0, 0, 0, 0, 1)
+	header := p.preloginHeader(cookie, cgi, uint64(len(plain)), pin.version)
 	n := len(header) + 3
 	if n > 63 {
 		return nil, nil, errors.New("native business header too large")
