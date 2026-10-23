@@ -43,12 +43,18 @@ func (s nativeStore) chatSnapshot(owner string) (chatSnapshot, error) {
 		}
 		mergeContacts(result.Contacts, record.Batch.Commands)
 	}
+	native.ProjectMessages(result.Messages)
 	return result, nil
 }
 func mergeContacts(contacts map[string]native.Contact, commands []native.SyncCommand) {
 	for _, cmd := range commands {
 		if cmd.ID == 2 {
 			if c, err := native.DecodeContact(cmd.Payload); err == nil {
+				previous := contacts[c.Username]
+				c.Flags = (previous.Flags & ^c.FlagMask) | (c.Flags & c.FlagMask)
+				if len(c.Members) == 0 {
+					c.Members = previous.Members
+				}
 				contacts[c.Username] = c
 			}
 		}
@@ -63,6 +69,7 @@ type chatSyncResult struct {
 	Retry    bool
 }
 type chatSendResult struct {
+	ReplyTo    *native.Message
 	Peer, Text string
 	Message    native.Message
 	Accepted   bool
@@ -144,7 +151,13 @@ func (c *chatService) sync(ctx context.Context) chatSyncResult {
 	return result
 }
 func (c *chatService) send(ctx context.Context, peer, text string) chatSendResult {
-	result := chatSendResult{Peer: peer, Text: text}
+	return c.deliver(ctx, peer, text, nil, "")
+}
+func (c *chatService) reply(ctx context.Context, target native.Message, text, name string) chatSendResult {
+	return c.deliver(ctx, target.Peer, text, &target, name)
+}
+func (c *chatService) deliver(ctx context.Context, peer, text string, reply *native.Message, name string) chatSendResult {
+	result := chatSendResult{Peer: peer, Text: text, ReplyTo: reply}
 	lock, err := c.store.lock(ctx)
 	if err != nil {
 		result.Err = err
@@ -165,13 +178,18 @@ func (c *chatService) send(ctx context.Context, peer, text string) chatSendResul
 		return result
 	}
 	defer session.Close()
-	id, err := session.SendText(ctx, state.Account, peer, text)
+	if reply != nil {
+		result.Message, err = session.SendReply(ctx, state.Account, *reply, text, name)
+	} else {
+		var id string
+		id, err = session.SendText(ctx, state.Account, peer, text)
+		result.Message = native.Message{ID: id, From: c.owner, To: peer, Peer: peer, Text: text, Type: 1, Timestamp: uint32(time.Now().Unix()), Outgoing: true}
+	}
 	if err != nil {
 		result.Err = err
 		return result
 	}
 	result.Accepted = true
-	result.Message = native.Message{ID: id, From: c.owner, To: peer, Peer: peer, Text: text, Type: 1, Timestamp: uint32(time.Now().Unix()), Outgoing: true}
 	if err = c.store.journal(nativeJournal{Owner: c.owner, Messages: []native.Message{result.Message}}); err != nil {
 		result.Err = fmt.Errorf("accepted by WeChat, but archiving failed: %w", err)
 		return result

@@ -15,16 +15,22 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/kevmo314/wechat-cli/internal/native"
 )
 
 const usage = `wechat — standalone Go WeChat CLI
 
-Usage: wechat [--config-dir DIR] [--backend native|ilink] [COMMAND] [OPTIONS]
+Usage: wechat [--config-dir DIR] [--backend native|ilink] [--profile phone|tablet|desktop] [COMMAND] [OPTIONS]
 
   (no command)                           Open the interactive WeChat client
   tui      [--offline]                   Open the TUI / browse local history
 
   login    [--qr FILE.png] [--timeout 8m]   Pair using a WeChat QR code
+  translate [--id ID | --text TEXT] [--lang en]  Translate using WeChat
+  mark-read --to ID                       Sync conversation read state to other devices
+  attachment --id ID [--output FILE] [--preview]  Download / preview an attachment
+  wait     [--timeout 5m] [--json] [--from ID]  Wait for a new incoming message
   read     [--follow] [--json]             Synchronize available messages
   send     --to USER [--text TEXT | --stdin]
   contacts                               List users seen by read
@@ -68,6 +74,7 @@ func run(ctx context.Context, args []string) error {
 	root := flags("wechat")
 	dir := root.String("config-dir", filepath.Join(config, "wechat-cli"), "directory for private account state")
 	backend := root.String("backend", "native", "native desktop protocol or ilink bot API")
+	profile := root.String("profile", "", "phone, tablet, or desktop; each uses separate saved credentials")
 	root.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	if err := root.Parse(args); err != nil {
 		return err
@@ -82,28 +89,75 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 	if command == "version" {
-		fmt.Println("wechat-cli 0.2.0 (native desktop experimental; iLink compatibility " + protocolVersion + ")")
+		fmt.Println("wechat-cli 0.3.0 (native desktop experimental; iLink compatibility " + protocolVersion + ")")
 		return nil
 	}
 	store := Store{*dir}
+	explicitDir := false
+	root.Visit(func(f *flag.Flag) {
+		if f.Name == "config-dir" {
+			explicitDir = true
+		}
+	})
 	if *backend == "native" {
+		requested := *profile
+		if requested != "" {
+			canonical, err := native.NormalizeProfile(requested)
+			if err != nil {
+				return err
+			}
+			requested = canonical
+		}
 		if command == "tui" {
-			explicitDir := false
-			root.Visit(func(f *flag.Flag) {
-				if f.Name == "config-dir" {
-					explicitDir = true
+			for {
+				chosen := store
+				if requested != "" {
+					chosen, err = profileStore(store, config, requested, explicitDir)
+					if err != nil {
+						return err
+					}
+				} else {
+					chosen = preferredProfileStore(store, config, explicitDir)
 				}
-			})
-			if !explicitDir {
-				candidate := Store{filepath.Join(config, "wechat-tablet")}
-				state, err := (nativeStore{filepath.Join(candidate.Dir, "native")}).state()
-				if err == nil && state.Account != nil && state.Account.Profile == "android-tablet" {
-					store = candidate
+				if requested != "" {
+					if err = rememberProfile(store, requested); err != nil {
+						return err
+					}
+				}
+				err = nativeTUI(ctx, chosen, args, requested)
+				var change *profileSwitchRequest
+				if errors.As(err, &change) {
+					requested = change.Profile
+					continue
+				}
+				return err
+			}
+		}
+		if requested == "" {
+			store = preferredProfileStore(store, config, explicitDir)
+		}
+		if requested != "" {
+			store, err = profileStore(store, config, requested, explicitDir)
+			if err != nil {
+				return err
+			}
+			if command == "login" {
+				local, present, err := loginProfileArgument(args)
+				if err != nil {
+					return err
+				}
+				if present && local != requested {
+					return errors.New("global and login --profile options disagree")
+				}
+				if !present {
+					args = append(args, "--profile", requested)
 				}
 			}
-			return nativeTUI(ctx, store, args)
 		}
 		return nativeCommand(ctx, store, command, args)
+	}
+	if *profile != "" {
+		return errors.New("--profile requires the native backend")
 	}
 	if *backend != "ilink" {
 		return errors.New("backend must be native or ilink")

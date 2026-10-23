@@ -73,12 +73,7 @@ func (s nativeStore) save(name string, value any) error {
 	if err = os.Rename(f.Name(), path); err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return syncDirectory(filepath.Dir(path))
 }
 func (s nativeStore) lock(ctx context.Context) (*flock.Flock, error) {
 	path := filepath.Join(s.dir, "state.lock")
@@ -145,6 +140,7 @@ func (s nativeStore) history(owner string) ([]native.Message, error) {
 			}
 		}
 	}
+	native.ProjectMessages(result)
 	return result, nil
 }
 
@@ -156,6 +152,14 @@ func nativeCommand(ctx context.Context, store Store, command string, args []stri
 	switch command {
 	case "login":
 		return nativeLogin(ctx, store, s, args)
+	case "translate":
+		return translateCommand(ctx, store, args)
+	case "mark-read":
+		return markReadCommand(ctx, store, args)
+	case "attachment":
+		return attachmentCommand(ctx, store, args)
+	case "wait":
+		return waitMessage(ctx, store, args)
 	case "read":
 		return nativeRead(ctx, store, s, args)
 	case "send":
@@ -246,13 +250,15 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	png := f.String("qr", "", "also save the native QR as PNG")
 	timeout := f.Duration("timeout", 8*time.Minute, "overall login timeout")
 	resume := f.Bool("resume", false, "resume the saved QR/approval attempt")
-	profile := f.String("profile", native.DesktopProfile, "desktop or experimental android-tablet (use a separate --config-dir)")
+	profile := f.String("profile", native.DesktopProfile, "phone, tablet, or desktop (use a separate --config-dir)")
 	if err := parse(f, args); err != nil {
 		return err
 	}
-	if *profile != native.DesktopProfile && *profile != native.AndroidTabletProfile {
-		return errors.New("profile must be desktop or android-tablet")
+	canonicalProfile, err := native.NormalizeProfile(*profile)
+	if err != nil {
+		return err
 	}
+	*profile = canonicalProfile
 	profileExplicit := false
 	f.Visit(func(v *flag.Flag) {
 		if v.Name == "profile" {
@@ -296,7 +302,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 		if profileExplicit && storedProfile != *profile {
 			return errors.New("saved login uses a different profile; start a fresh login or use its matching --profile")
 		}
-		if storedProfile != native.DesktopProfile && storedProfile != native.AndroidTabletProfile {
+		if storedProfile != native.DesktopProfile && storedProfile != native.AndroidTabletProfile && storedProfile != native.PhoneProfile {
 			return errors.New("unsupported saved login profile")
 		}
 		if time.Now().Unix()-attempt.Created > 900 {
@@ -317,8 +323,10 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 			return err
 		}
 	}
-	if attempt.Profile == native.AndroidTabletProfile {
-		fmt.Fprintln(os.Stderr, "Experimental Android tablet login. Desktop coexistence and device verification are not yet validated.\nApprove WeChat CLI on your phone to test it.")
+	if attempt.Profile == native.PhoneProfile {
+		fmt.Fprintln(os.Stderr, "Experimental phone login may replace your primary phone session.\nApprove on your phone only if you want to test this profile.")
+	} else if attempt.Profile == native.AndroidTabletProfile {
+		fmt.Fprintln(os.Stderr, "Experimental Android tablet login. Desktop coexistence was observed on the tested account; other device combinations are unverified.\nApprove WeChat CLI on your phone to test it.")
 	} else {
 		fmt.Fprintln(os.Stderr, "Native desktop login uses your desktop session and can log out another computer.\nApprove WeChat CLI on your phone to continue.")
 	}
@@ -474,6 +482,7 @@ func nativeSend(ctx context.Context, s nativeStore, args []string) error {
 	to := f.String("to", "", "native username/wxid learned from read")
 	text := f.String("text", "", "text to send")
 	stdin := f.Bool("stdin", false, "read message text from standard input")
+	replyID := f.String("reply-to", "", "quote this archived server message ID")
 	if err := parse(f, args); err != nil {
 		return err
 	}
@@ -499,11 +508,6 @@ func nativeSend(ctx context.Context, s nativeStore, args []string) error {
 	if strings.TrimSpace(*text) == "" || len(*text) > 60*1024 {
 		return errors.New("message must contain 1–61440 bytes")
 	}
-	lock, err := s.lock(ctx)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
 	state, err := s.state()
 	if err != nil {
 		return err
@@ -511,21 +515,30 @@ func nativeSend(ctx context.Context, s nativeStore, args []string) error {
 	if state.Account == nil {
 		return errors.New("not logged in natively; run wechat login")
 	}
-	connection, err := native.Connect(ctx, state.Account.Host)
-	if err != nil {
-		return err
+	service := &chatService{store: s, owner: state.Account.Username}
+	var result chatSendResult
+	if *replyID != "" {
+		snapshot, err := s.chatSnapshot(state.Account.Username)
+		if err != nil {
+			return err
+		}
+		var target *native.Message
+		for i := range snapshot.Messages {
+			m := &snapshot.Messages[i]
+			if m.ID == *replyID && m.Peer == *to {
+				target = m
+				break
+			}
+		}
+		if target == nil {
+			return errors.New("reply target is not in this conversation's archive")
+		}
+		result = service.reply(ctx, *target, *text, publicQuoteName(snapshot.Contacts, *target))
+	} else {
+		result = service.send(ctx, *to, *text)
 	}
-	defer connection.Close()
-	id, err := connection.SendText(ctx, state.Account, *to, *text)
-	if err != nil {
-		return err
+	if result.Err != nil {
+		return result.Err
 	}
-	message := native.Message{ID: id, From: state.Account.Username, To: *to, Peer: *to, Type: 1, Text: *text, Timestamp: uint32(time.Now().Unix()), Outgoing: true}
-	if err = s.journal(nativeJournal{Owner: state.Account.Username, Messages: []native.Message{message}}); err != nil {
-		return fmt.Errorf("message accepted but local archival failed: %w", err)
-	}
-	if err = s.save("state.json", state); err != nil {
-		return fmt.Errorf("message accepted but saving the session failed: %w", err)
-	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]string{"id": id, "status": "accepted"})
+	return json.NewEncoder(os.Stdout).Encode(map[string]string{"id": result.Message.ID, "status": "accepted"})
 }

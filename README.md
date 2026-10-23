@@ -1,62 +1,75 @@
 # wechat-cli
 
-A standalone Go CLI for personal WeChat messages using the native desktop protocol. No WeChat desktop process, OpenClaw, Rust daemon, or bridge service is required. The original iLink/ClawBot backend remains available with `--backend ilink`.
+A standalone Go terminal client for personal WeChat messages. Run `wechat` to open the TUI, or use individual CLI commands. It connects directly through the native protocol; no WeChat desktop app or bridge service is required. The original bot backend remains available with `--backend ilink`.
 
-**Experimental:** the default desktop profile can log out another computer using the same account. The new Android tablet profile completed login and message sync, and the user reported that the other clients stayed signed in. One explicitly authorized text send also returned server acceptance; recipient delivery/read status was not independently checked. See the [tablet investigation and live results](docs/tablet-protocol.md).
+**Experimental:** tablet login and message sync have been tested, with the other clients remaining signed in on the tested account. Desktop login may replace another desktop session. The phone profile has passed QR request/poll tests; full phone login remains untested and may replace your phone session.
 
-## Build
+## Build and login
 
-Requires Go 1.25 or newer.
+Requires Go 1.25 or newer. [GitHub Actions](https://github.com/kevmo314/wechat-cli/actions) produces Linux, macOS, and Windows binaries for amd64 and arm64, with checksums.
 
 ```sh
 go build -o bin/wechat .
-./bin/wechat --help
-# Or: go install github.com/kevmo314/wechat-cli@latest
-# The installed command is named wechat-cli.
-```
-
-## Use
-
-To try the Android tablet profile while retaining your existing desktop CLI state:
-
-```sh
-./bin/wechat --config-dir ~/.config/wechat-tablet login --profile android-tablet
-./bin/wechat --config-dir ~/.config/wechat-tablet read --follow
-./bin/wechat --config-dir ~/.config/wechat-tablet history --limit 50
-./bin/wechat --config-dir ~/.config/wechat-tablet send --to 'RECIPIENT_ID' --text 'Hello!'
-```
-
-The saved account remembers its protocol profile, so subsequent commands only need the same config directory. To resume a tablet QR attempt, use `login --resume --profile android-tablet` in that directory. Coexistence has been observed on one account; it is not guaranteed for every account or device combination.
-
-For the default desktop profile:
-
-```sh
 # Scan the terminal QR and approve on your phone.
-./bin/wechat login
-# Optional PNG output, in addition to the terminal QR:
-./bin/wechat login --qr login.png
+./bin/wechat --profile tablet login
+./bin/wechat --profile tablet
+```
+
+Choose `--profile phone`, `--profile tablet`, or `--profile desktop`. Each profile keeps separate credentials. The TUI remembers your selected profile and lets you change it with Ctrl+P. Existing tablet state in `~/.config/wechat-tablet` is recognized. Global flags precede the command.
+
+The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. `login --qr login.png` also saves an image; `login --resume` resumes an unexpired attempt. New-device phone/LAN verification challenges are detected but not implemented.
+
+## Terminal interface
+
+The conversation list stays visible and the message box stays focused. Messages have compact sender/time labels and indented wrapped lines. Pinned chats are marked `PIN`; unread counts and terminal notifications indicate incoming messages. Viewed conversations send read-state updates while visible, focused, and scrolled to the bottom.
+
+| Action | Key |
+| --- | --- |
+| Switch chats | Up / Down |
+| Scroll messages | PgUp / PgDn |
+| Send | Enter or Ctrl+S |
+| New line | Alt+Enter or Ctrl+J |
+| Search / new chat | Ctrl+K / Ctrl+N |
+| Select a message | Click it |
+| Reply to selected message (latest incoming by default) | Ctrl+R or right-click |
+| Cancel reply | Ctrl+X |
+| View quoted original | Click its quoted preview |
+| Open a link | Click the link or shared-link message |
+| Translate / hide translation | Ctrl+T |
+| Download attachment / view image | Ctrl+O, then select and Enter |
+| Choose device profile | Ctrl+P |
+| Optional message details | Ctrl+E |
+| Refresh / retry sync | Alt+S |
+| Restore failed send | Ctrl+Y |
+| Help / quit | Ctrl+G / Ctrl+Q |
+
+Translations use WeChat's authenticated server API, with no separate translation account or API key. English is the default; use `tui --language zh_CN` to change it. Translations appear below the original and are cached privately. Deleted messages are marked and cannot be quoted or translated. Group names use contact and group-member data when available.
+
+Images render as colored terminal blocks. Image and file downloads are supported; voice/video downloads and media uploads are not implemented. On a remote terminal, opening a URL may require your terminal's Ctrl+click support. Quoted replies are implemented but have not yet been tested with a live send.
+
+Drafts stay with each chat and clear immediately when submitted. Failed sends can restore their draft; interrupted sends are never automatically retried because delivery may be uncertain.
+
+## CLI commands
+
+```sh
 ./bin/wechat status
-
-# Synchronize available messages and keep receiving updates.
 ./bin/wechat read --follow
-./bin/wechat read --json
-
-# Browse messages already synchronized by this CLI.
 ./bin/wechat history --limit 50
 ./bin/wechat contacts
-
-# Use a native username/wxid or chatroom ID learned from read/contacts.
-./bin/wechat send --to 'RECIPIENT_ID' --text 'Hello from Go!'
-printf 'A multiline\nmessage\n' | ./bin/wechat send --to 'RECIPIENT_ID' --stdin
+./bin/wechat send --to RECIPIENT_ID --text 'Hello!'
+./bin/wechat send --to RECIPIENT_ID --text 'Reply' --reply-to MESSAGE_ID
+./bin/wechat wait --timeout 60s --json
+./bin/wechat wait --from RECIPIENT_ID --json
+./bin/wechat attachment --id MESSAGE_ID --preview
+./bin/wechat translate --text '你好，世界' --lang en
+./bin/wechat translate --id MESSAGE_ID --lang en
+./bin/wechat mark-read --to RECIPIENT_ID
+./bin/wechat tui --offline
 ```
 
-`read` drains available sync pages and exits. `--follow` checks for updates every three seconds after draining them. It stops on transport/session errors; session renewal and automatic reconnection are not implemented. Run `read` again after a temporary connection failure. An expired or superseded authorization requires another phone-approved login. Sends are never automatically retried because an interrupted response can leave delivery uncertain.
+Use `--help` on a command for options. `wait` returns the next new incoming message and works alongside the TUI by observing its sync journal. With no reader running, it performs sync itself. A timeout exits unsuccessfully. `read` drains available sync pages; `--follow` continues polling. `read --json` and `history` emit one message per JSON line.
 
-`read --json` and `history` output one decoded message per JSON line. Messages include server ID, sender, recipient, peer, message type, content, timestamp, and direction. Non-text content may contain raw XML or other native payload text; media downloading and rich formatting are not implemented. `contacts` lists peer IDs observed in the local archive, rather than fetching a complete address book.
-
-**History scope:** first-login sync can return existing messages. The first desktop login synchronized 503 entries. The tablet login synchronized 496 entries, including 121 text messages; other entries included media and system events. This does not establish that all conversations or all historical messages are available. `history` only reads this CLI's local archive. Phone migration/backup and official desktop database import are not implemented.
-
-The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. A saved temporary QR/approval can be resumed with `login --resume` until it expires. New-device phone/LAN verification challenges are detected but not implemented.
+**History scope:** initial desktop and tablet sync returned existing messages, but this does not establish access to all conversations or all historical messages. `history` reads only this CLI's archive. Phone migration/backup and official desktop database import are not implemented.
 
 ## State and concurrency
 
@@ -77,7 +90,7 @@ Only one reader/login/logout process can run per config directory. Sending can r
 
 ## Protocol and validation
 
-The Go implementation verifies MMTLS server signatures and encrypted records, then uses encrypted native protobuf calls for QR request/poll, phone-grant authentication, sync, and text sends. It follows the inspected Linux 4.1.13.26 profile. There is no insecure signature-verification switch. Request notice checksums currently use zero; the tested server accepted QR, authentication, and sync requests, but compatibility with other accounts/builds is not established.
+The Go implementation verifies MMTLS server signatures and encrypted records, then uses encrypted native protobuf calls for QR request/poll, phone-grant authentication, sync, and text sends. Profiles were investigated using the official Linux 4.1.13.26 client and Android 8.0.79 APK. There is no insecure signature-verification switch. Request notice checksums currently use zero; the tested server accepted QR, authentication, and sync requests, but compatibility with other accounts/builds is not established.
 
 See [native protocol findings](docs/native-protocol.md) for the inspected official binary, route IDs, protocol references, and live validation limits. See [iLink usage](docs/ilink.md) for the original bot backend. This is an independent client, not an official Tencent product.
 

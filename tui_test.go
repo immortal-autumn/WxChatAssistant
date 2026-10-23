@@ -118,7 +118,7 @@ func TestTUIEscapesRemoteTerminalControl(t *testing.T) {
 	}
 }
 func TestTUIMediaPreviews(t *testing.T) {
-	if got := messagePreview(native.Message{Type: 49, Text: "<msg><appmsg><title>A shared link</title></appmsg></msg>"}); got != "↗ A shared link" {
+	if got := messagePreview(native.Message{Type: 49, Text: "<msg><appmsg><title>A shared link</title></appmsg></msg>"}); got != "[Shared item] A shared link" {
 		t.Fatal(got)
 	}
 	if got := messagePreview(native.Message{Type: 3, Text: "raw image metadata"}); strings.Contains(got, "metadata") {
@@ -131,5 +131,169 @@ func TestCompactMessageLayout(t *testing.T) {
 	m.resize(120, 30)
 	if n := m.viewport.TotalLineCount(); n > 3 {
 		t.Fatalf("two short messages should not consume three lines each: %d", n)
+	}
+}
+
+func TestTUIArrowNavigationKeepsComposerFocused(t *testing.T) {
+	m := testChatModel()
+	m.composer.SetValue("Alice draft")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(chatModel)
+	if m.selected != "bob" || m.focus != focusCompose || !m.composer.Focused() {
+		t.Fatal("arrow navigation left composer focus")
+	}
+	m.composer.SetValue("Bob draft")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(chatModel)
+	if m.composer.Value() != "Alice draft" {
+		t.Fatal("switching lost the original draft")
+	}
+}
+func TestPinnedConversationAndUnreadActivity(t *testing.T) {
+	m := testChatModel()
+	c := m.contacts["alice"]
+	c.Flags = 0x803
+	m.contacts["alice"] = c
+	m.rebuildRows()
+	next, _ := m.Update(chatSyncResult{Messages: []native.Message{{ID: "new-bob", From: "bob", To: "me", Peer: "bob", Type: 1, Text: "new arrival with older server clock", Timestamp: 1}}})
+	m = next.(chatModel)
+	if m.rows[0].Peer != "alice" {
+		t.Fatal("incoming activity displaced a pinned conversation")
+	}
+	if m.totalUnread() != 1 || m.unread["bob"] != 1 {
+		t.Fatal("incoming unread event not counted")
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "PIN ·") {
+		t.Fatal("pinned conversation not demarcated")
+	}
+	next, _ = m.Update(chatSyncResult{Messages: []native.Message{{ID: "new-bob", From: "bob", Peer: "bob", Type: 1, Timestamp: 1}}})
+	m = next.(chatModel)
+	if m.totalUnread() != 1 {
+		t.Fatal("replayed batch double-counted unread")
+	}
+}
+func TestHangingMessageIndent(t *testing.T) {
+	text := hangingMessage("Alice 12:34  This is a message that wraps onto a few continuation lines.", 32)
+	lines := strings.Split(ansi.Strip(text), "\n")
+	if len(lines) < 2 {
+		t.Fatal("fixture did not wrap")
+	}
+	for _, line := range lines[1:] {
+		if !strings.HasPrefix(line, "  ") {
+			t.Fatalf("continuation not indented: %q", line)
+		}
+		if lipgloss.Width(line) > 32 {
+			t.Fatal("wrapped line overflow")
+		}
+	}
+}
+
+type fakeReadBackend struct {
+	fakeChatBackend
+	reads int
+}
+
+func (f *fakeReadBackend) markRead(_ context.Context, m native.Message) chatReadResult {
+	f.reads++
+	return chatReadResult{Peer: m.Peer, MessageID: m.ID, Accepted: true}
+}
+func TestReadStateRequiresVisibleFocusedBottom(t *testing.T) {
+	m := testChatModel()
+	backend := &fakeReadBackend{}
+	m.backend = backend
+	due := chatReadDue{Peer: "alice", MessageID: "1"}
+	m.terminalFocused = false
+	next, cmd := m.update(due)
+	m = next.(chatModel)
+	if cmd != nil || backend.reads != 0 {
+		t.Fatal("background terminal marked conversation read")
+	}
+	m.terminalFocused = true
+	m.mediaOpen = true
+	_, cmd = m.update(due)
+	if cmd != nil {
+		t.Fatal("attachment overlay marked conversation read")
+	}
+	m.mediaOpen = false
+	m.viewport.SetContent("one\ntwo\nthree")
+	m.viewport.Height = 1
+	m.viewport.GotoTop()
+	_, cmd = m.update(due)
+	if cmd != nil {
+		t.Fatal("scrolled-back view marked conversation read")
+	}
+	m.viewport.GotoBottom()
+	next, cmd = m.update(due)
+	m = next.(chatModel)
+	if cmd == nil {
+		t.Fatal("visible boundary did not schedule read")
+	}
+	result := cmd()
+	if backend.reads != 1 {
+		t.Fatal("read not submitted")
+	}
+	next, _ = m.update(result)
+	m = next.(chatModel)
+	_, cmd = m.update(due)
+	if cmd != nil {
+		t.Fatal("same read boundary resubmitted")
+	}
+}
+
+func TestDeletedSharedItemAndGroupSenderLabel(t *testing.T) {
+	m := testChatModel()
+	m.contacts["room@chatroom"] = native.Contact{Username: "room@chatroom", Nickname: "Team", Members: map[string]string{"alice": "Room Alias"}}
+	if got := m.senderName("room@chatroom", "alice"); got != "Room Alias" {
+		t.Fatal("roster name not resolved", got)
+	}
+	m.contacts["alice"] = native.Contact{Username: "alice", Nickname: "Alice", Remark: "My Alice"}
+	if got := m.senderName("room@chatroom", "alice"); got != "My Alice" {
+		t.Fatal("personal remark did not take precedence", got)
+	}
+	item := native.Message{Type: 49, Deleted: true, Text: "<msg><appmsg><title>Interview notes</title></appmsg></msg>"}
+	if got := messagePreview(item); got != "[Deleted] Interview notes" {
+		t.Fatal("deleted shared item not marked", got)
+	}
+}
+
+func TestMessageLinksRejectTerminalControlsAndOtherSchemes(t *testing.T) {
+	for _, value := range []string{"file:///etc/passwd", "javascript:alert(1)", "https://example.com/\x1b]52;c;payload\a", "https://user:password@example.com/"} {
+		if _, ok := validWebURL(value); ok {
+			t.Fatal("unsafe web URL accepted")
+		}
+	}
+	links := messageLinks(native.Message{Type: 1, Text: "See https://example.com/a and https://example.com/b."})
+	if len(links) != 2 || links[1] != "https://example.com/b" {
+		t.Fatal(links)
+	}
+	if links = messageLinks(native.Message{Type: 1, Deleted: true, Text: "https://example.com/"}); len(links) != 0 {
+		t.Fatal("deleted message still exposed a clickable link")
+	}
+}
+func TestQuotedMessageViewerAndReplySelection(t *testing.T) {
+	m := testChatModel()
+	source := native.Message{ID: "99", Peer: "alice", From: "alice", To: "me", Type: 1, Text: "Original message", Timestamp: 10}
+	quoted := native.Message{ID: "100", Peer: "alice", From: "alice", To: "me", Type: 49, Timestamp: 11, Text: `<msg><appmsg><type>57</type><title>Reply</title><refermsg><type>1</type><svrid>99</svrid><fromusr>alice</fromusr><chatusr>alice</chatusr><displayname>Alice</displayname><content>Original message</content></refermsg></appmsg></msg>`}
+	m.addMessages([]native.Message{source, quoted}, false)
+	m.openMessageActions()
+	next, _ := m.messageActionKey("v")
+	m = next.(chatModel)
+	if m.actionsDetail == nil || m.actionsDetail.ID != "99" || m.actionsDetail.Text != "Original message" {
+		t.Fatal("quoted target not resolved")
+	}
+	next, _ = m.messageActionKey("r")
+	m = next.(chatModel)
+	if m.actionsOpen || m.replyTargets["alice"].ID != "99" || m.focus != focusCompose {
+		t.Fatal("reply selection did not return to composer")
+	}
+	m.selectPeer("bob")
+	if _, ok := m.replyTargets["bob"]; ok {
+		t.Fatal("reply target crossed conversation boundary")
+	}
+	c := m.contacts["alice"]
+	c.Remark = "Private personal note"
+	m.contacts["alice"] = c
+	if publicQuoteName(m.contacts, source) != "Alice 王" {
+		t.Fatal("private contact remark would leak in an outgoing quote")
 	}
 }

@@ -231,3 +231,12 @@ Other relevant class locations: `nd5.b30` in `classes2.dex`, `nd5.jp3` in
 `classes4.dex`, and `com.tencent.mm.app.s7` / `kd5.ui` in `classes11.dex`.
 Locate renamed equivalents through the route/log strings and the generated
 protobuf serializers when inspecting another APK version.
+
+
+## Additional authenticated APIs
+
+The client now supports HTTP shortlink requests protected by the existing MMTLS session credentials, including status notifications (CGI 251), group-member details (551), quoted app messages (222), and translation (631).
+
+The official Android 8.0.79 APK contains `/cgi-bin/micromsg-bin/gettranstext`. Its direct translation requester uses a base request in field 1, item count in field 2, repeated text items in field 3, and target language in field 4. Each item carries its ID in field 1, original text in field 2, and scene 17 in field 4. Responses contain matching item IDs, translated text, and per-item status. A live authenticated request translating `你好，世界` to `en` returned `Hello, world.`; this confirms server translation is usable without a separate translation provider. This test used an explicit phrase rather than a private chat message.
+
+Native image download and read-state notification returned successful server responses. Other-device badge changes have not been independently checked. Quoted-reply encoding is covered by fixtures but has not been tested with a live send. Phone-profile QR request and poll work; full phone authorization remains untested.
