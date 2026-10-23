@@ -81,7 +81,8 @@ func (m *chatModel) refreshHistory(bottom bool) {
 				if strings.Contains(ansi.Strip(text), uri) {
 					continue
 				}
-				block := hangingMessage("  │ "+terminalLink(uri, uri), m.viewport.Width)
+				label := compactLinkLabel(uri, max(1, m.viewport.Width-6))
+				block := "  │ " + terminalLink(uri, label)
 				add(chatDim.Render(block), chatLineRef{MessageID: v.ID, RichURL: uri}, nil)
 			}
 		}

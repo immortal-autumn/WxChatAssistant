@@ -66,6 +66,24 @@ func terminalLink(uri, label string) string {
 	}
 	return label
 }
+
+func compactLinkLabel(uri string, width int) string {
+	if lipgloss.Width(uri) <= width {
+		return uri
+	}
+	label := uri
+	if u, err := url.Parse(uri); err == nil && u.Host != "" {
+		label = u.Host + u.EscapedPath()
+		if u.RawQuery != "" {
+			label += "?…"
+		}
+		if u.Fragment != "" {
+			label += "#…"
+		}
+	}
+	return ansi.Truncate(label, max(1, width), "…")
+}
+
 func linkify(text string) string {
 	return webURL.ReplaceAllStringFunc(text, func(value string) string {
 		uri, ok := validWebURL(strings.TrimRight(value, ".,!?;:"))
