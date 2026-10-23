@@ -28,7 +28,9 @@ go build -o bin/wechat .
 
 ```sh
 # Scan the terminal QR in WeChat; confirm on your phone.
-# Enter the verification code if prompted. PNG output is optional.
+# Enter the verification code if prompted. No image viewer is needed.
+./bin/wechat login
+# Optionally save the same QR as a PNG too:
 ./bin/wechat login --qr login.png
 ./bin/wechat status
 
@@ -40,6 +42,8 @@ go build -o bin/wechat .
 ./bin/wechat send --to 'USER_ID_FROM_READ' --text 'Hello from Go!'
 printf 'A multiline\nreply\n' | ./bin/wechat send --to 'USER_ID_FROM_READ' --stdin
 ```
+
+`login` always renders a black-on-white QR in the terminal, including over SSH and on dark backgrounds. If the server supplies a JPEG/PNG image URL or a base64 image, the CLI scans it and renders the actual pairing payload instead of encoding the image URL or image bytes. Plain pairing links remain supported. QR refreshes are rendered automatically; `--qr FILE.png` saves the same decoded payload as a PNG.
 
 `read` without `--follow` performs one long poll (normally up to 40 seconds). It returns successfully with no output when no messages arrive. `--follow` retries transport failures with bounded backoff and stops on API errors. Ctrl-C stops polling. An expired session (`-14`) requires another login.
 
@@ -78,4 +82,4 @@ go test -race ./...
 go vet ./...
 ```
 
-Tests use a local HTTP server for QR refresh/verification, request headers, polling cursors, message payloads, error handling, cancellation, and concurrent state updates. A live smoke check also successfully fetched a QR code from Tencent and generated a valid PNG; the unscanned login timed out as expected. Authenticated receive/send and end-to-end delivery still require pairing with a real WeChat account.
+Tests use a local HTTP server for QR refresh/verification, request headers, polling cursors, message payloads, error handling, cancellation, and concurrent state updates. QR tests scan JPEG/base64/HTTP fixtures, reconstruct and scan the rendered terminal glyphs, verify matching PNG output, and reject malformed/oversized images. A live smoke check also successfully fetched a QR code from Tencent and generated a valid PNG; the unscanned login timed out as expected. Authenticated receive/send and end-to-end delivery still require pairing with a real WeChat account.

@@ -15,8 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	qrcode "github.com/skip2/go-qrcode"
 )
 
 const usage = `wechat — standalone Tencent iLink bot CLI
@@ -172,24 +170,7 @@ func login(ctx context.Context, store Store, args []string) error {
 		tokens = append(tokens, old.Token)
 	}
 	display := func(q QRCode) error {
-		code, err := qrcode.New(q.Content, qrcode.Medium)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(os.Stderr, "Scan this QR code in WeChat:")
-		fmt.Fprint(os.Stderr, code.ToSmallString(false))
-		fmt.Fprintln(os.Stderr, q.Content)
-		if *png != "" {
-			data, err := code.PNG(512)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(*png, data, 0600); err != nil {
-				return err
-			}
-			fmt.Fprintln(os.Stderr, "QR PNG:", *png)
-		}
-		return nil
+		return displayLoginQR(ctx, client.HTTP, os.Stderr, q, *png)
 	}
 	input := bufio.NewReader(os.Stdin)
 	verify := func(ctx context.Context) (string, error) {
