@@ -76,6 +76,15 @@ func (m *chatModel) refreshHistory(bottom bool) {
 			ref.RichURL = links[0]
 		}
 		add(hangingMessage(style.Render(label)+text, m.viewport.Width), ref, links)
+		if v.Type == 49 {
+			for _, uri := range links {
+				if strings.Contains(ansi.Strip(text), uri) {
+					continue
+				}
+				block := hangingMessage("  │ "+terminalLink(uri, uri), m.viewport.Width)
+				add(chatDim.Render(block), chatLineRef{MessageID: v.ID, RichURL: uri}, nil)
+			}
+		}
 		if !v.Deleted {
 			if quoted, name, ok := m.referencedMessage(v); ok {
 				if name == "" {
