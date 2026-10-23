@@ -6,6 +6,8 @@ Supports QR login in your terminal and as a PNG, verification codes, QR refresh,
 
 This is a bot conversation client, **not a personal WeChat inbox client**. It cannot enumerate your personal contacts, fetch your chat history, or send arbitrary messages to friends. Your WeChat account/app must support the iLink / ClawBot pairing flow. Incoming attachments are shown as placeholders (full metadata is available with `--json`); media upload/download is not implemented.
 
+For accounts that cannot use ClawBot, a separate [native desktop protocol investigation](docs/native-protocol.md) now includes a Go MMTLS probe that verifies Tencent's native server and fetches a normal desktop QR. It is not yet an account login or messaging backend; `wechat login` still uses iLink.
+
 ## Build
 
 Requires Go 1.25 or newer.
