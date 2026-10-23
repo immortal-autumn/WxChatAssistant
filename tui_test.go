@@ -59,6 +59,9 @@ func TestTUISendCapturesRecipientAndBlocksDoubleSubmit(t *testing.T) {
 	m.composer.SetValue("Hello Alice")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(chatModel)
+	if m.composer.Value() != "" {
+		t.Fatal("composer did not clear immediately after submit")
+	}
 	if cmd == nil || !m.sending {
 		t.Fatal("explicit submit did not start")
 	}
@@ -120,5 +123,13 @@ func TestTUIMediaPreviews(t *testing.T) {
 	}
 	if got := messagePreview(native.Message{Type: 3, Text: "raw image metadata"}); strings.Contains(got, "metadata") {
 		t.Fatal(got)
+	}
+}
+
+func TestCompactMessageLayout(t *testing.T) {
+	m := testChatModel()
+	m.resize(120, 30)
+	if n := m.viewport.TotalLineCount(); n > 3 {
+		t.Fatalf("two short messages should not consume three lines each: %d", n)
 	}
 }

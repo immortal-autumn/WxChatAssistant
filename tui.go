@@ -73,6 +73,13 @@ type chatModel struct {
 	lastSync                       time.Time
 	syncErr, notice                string
 	retries                        int
+	pendingPeer, pendingText       string
+	pendingAt                      uint32
+	failedDrafts                   map[string]string
+	activity                       map[string]uint64
+	latest                         map[string]native.Message
+	activityClock                  uint64
+	terminalFocused                bool
 }
 
 func newChatModel(ctx context.Context, backend chatBackend, owner, profile string, data chatSnapshot, offline bool) chatModel {
@@ -89,7 +96,7 @@ func newChatModel(ctx context.Context, backend chatBackend, owner, profile strin
 	composer.MaxWidth = 0
 	composer.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
 	composer.KeyMap.Paste.SetEnabled(false) // Bracketed terminal paste works without a clipboard subprocess.
-	m := chatModel{ctx: ctx, backend: backend, owner: owner, profile: profile, offline: offline, syncing: !offline, focus: focusChats, search: search, composer: composer, viewport: viewport.New(60, 12), contacts: data.Contacts, seen: map[string]bool{}, drafts: map[string]string{}, unread: map[string]int{}, width: 100, height: 30}
+	m := chatModel{ctx: ctx, backend: backend, owner: owner, profile: profile, offline: offline, syncing: !offline, focus: focusChats, search: search, composer: composer, viewport: viewport.New(60, 12), contacts: data.Contacts, seen: map[string]bool{}, failedDrafts: map[string]string{}, activity: map[string]uint64{}, latest: map[string]native.Message{}, terminalFocused: true, drafts: map[string]string{}, unread: map[string]int{}, width: 100, height: 30}
 	if m.contacts == nil {
 		m.contacts = map[string]native.Contact{}
 	}
@@ -115,7 +122,12 @@ func (m *chatModel) addMessages(messages []native.Message, incoming bool) {
 		}
 		m.seen[v.ID] = true
 		m.messages = append(m.messages, v)
-		if incoming && !v.Outgoing && visibleChatMessage(v) && v.Peer != m.selected {
+		if incoming && visibleChatMessage(v) {
+			m.activityClock++
+			m.activity[v.Peer] = m.activityClock
+			m.latest[v.Peer] = v
+		}
+		if incoming && !v.Outgoing && visibleChatMessage(v) && (v.Peer != m.selected || !m.terminalFocused || !m.viewport.AtBottom()) {
 			m.unread[v.Peer]++
 		}
 	}
@@ -225,13 +237,19 @@ func (m *chatModel) rebuildRows() {
 	}
 	m.rows = nil
 	query := strings.ToLower(strings.TrimSpace(m.query))
-	for _, c := range peers {
+	for peer, c := range peers {
+		if latest, ok := m.latest[peer]; ok {
+			c.Last = latest
+		}
 		if query != "" && !strings.Contains(strings.ToLower(m.name(c.Peer)+" "+c.Peer+" "+m.contacts[c.Peer].Alias), query) {
 			continue
 		}
 		m.rows = append(m.rows, c)
 	}
 	sort.Slice(m.rows, func(i, j int) bool {
+		if m.activity[m.rows[i].Peer] != m.activity[m.rows[j].Peer] {
+			return m.activity[m.rows[i].Peer] > m.activity[m.rows[j].Peer]
+		}
 		if m.rows[i].Last.Timestamp != m.rows[j].Last.Timestamp {
 			return m.rows[i].Last.Timestamp > m.rows[j].Last.Timestamp
 		}
@@ -297,7 +315,7 @@ func (m *chatModel) resize(w, h int) {
 	m.composer.SetWidth(inner)
 	m.composer.SetHeight(3)
 	m.viewport.Width = inner
-	m.viewport.Height = max(1, h-13)
+	m.viewport.Height = max(1, h-12)
 	m.ensureListVisible()
 	m.refreshHistory(true)
 }
@@ -323,12 +341,15 @@ func (m *chatModel) refreshHistory(bottom bool) {
 				text = rest
 			}
 		}
-		label := sender + "  " + time.Unix(int64(v.Timestamp), 0).Format("15:04")
+		label := ansi.Truncate(sender, max(8, m.viewport.Width/3), "…") + " " + time.Unix(int64(v.Timestamp), 0).Format("15:04") + "  "
 		style := chatDim
 		if v.Outgoing {
 			style = chatTitle
 		}
-		parts = append(parts, style.Render(ansi.Truncate(label, m.viewport.Width, "…")), ansi.Wrap(text, max(1, m.viewport.Width), ""), "")
+		parts = append(parts, ansi.Wrap(style.Render(label)+text, max(1, m.viewport.Width), ""))
+	}
+	if m.sending && m.pendingPeer == m.selected {
+		parts = append(parts, ansi.Wrap(chatDim.Render("You · sending  ")+chatSafeText(m.pendingText), max(1, m.viewport.Width), ""))
 	}
 	if len(parts) == 0 {
 		parts = []string{chatDim.Render("No messages yet."), "", chatDim.Render("Press Tab to compose a message.")}
@@ -356,7 +377,10 @@ func (m *chatModel) submit() tea.Cmd {
 	}
 	m.sending = true
 	m.notice = "Sending…"
-	m.drafts[peer] = text
+	m.pendingPeer, m.pendingText, m.pendingAt = peer, text, uint32(time.Now().Unix())
+	delete(m.drafts, peer)
+	m.composer.Reset()
+	m.refreshHistory(true)
 	return func() tea.Msg { return m.backend.send(m.ctx, peer, text) }
 }
 func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -399,20 +423,26 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatSendResult:
 		m.sending = false
 		if msg.Accepted {
-			m.addMessages([]native.Message{msg.Message}, false)
-			if m.drafts[msg.Peer] == msg.Text {
-				delete(m.drafts, msg.Peer)
-			}
-			if m.selected == msg.Peer && m.composer.Value() == msg.Text {
-				m.composer.Reset()
-			}
+			m.addMessages([]native.Message{msg.Message}, true)
+
 			m.rebuildRows()
 			m.refreshHistory(true)
 			m.notice = "Sent · accepted by WeChat"
 		}
 		if msg.Err != nil {
-			m.notice = chatSafeText(msg.Err.Error()) + " · check before retrying"
+			if !msg.Accepted {
+				if m.selected == msg.Peer && m.composer.Value() == "" {
+					m.composer.SetValue(msg.Text)
+				} else if m.drafts[msg.Peer] == "" && m.selected != msg.Peer {
+					m.drafts[msg.Peer] = msg.Text
+				} else {
+					m.failedDrafts[msg.Peer] = msg.Text
+				}
+			}
+			m.notice = chatSafeText(msg.Err.Error()) + " · check before retrying; Ctrl+Y restores failed text"
 		}
+		m.pendingPeer, m.pendingText = "", ""
+		m.refreshHistory(true)
 		return m, nil
 	case tea.KeyMsg:
 		if !msg.Paste {
@@ -428,6 +458,12 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.search.SetValue("")
 				m.rebuildRows()
 				return m, m.setFocus(focusSearch)
+			case "ctrl+y":
+				if text := m.failedDrafts[m.selected]; text != "" {
+					m.failedDrafts[m.selected] = m.composer.Value()
+					m.composer.SetValue(text)
+				}
+				return m, nil
 			case "ctrl+s":
 				return m, m.submit()
 			case "pgup":
@@ -618,7 +654,7 @@ func (m chatModel) View() string {
 		name = "Welcome to WeChat"
 	}
 	inner := rightW - 4
-	header := chatTitle.Render(ansi.Truncate(name, inner, "…")) + "\n" + chatDim.Render(ansi.Truncate(oneLine(m.selected), inner, "…")) + "\n" + chatDim.Render(strings.Repeat("─", inner))
+	header := ansi.Truncate(chatTitle.Render(name)+chatDim.Render("  "+oneLine(m.selected)), inner, "…") + "\n" + chatDim.Render(strings.Repeat("─", inner))
 	label := "MESSAGE  ·  Enter send  ·  Alt+Enter newline"
 	if m.sending {
 		label = "SENDING…"
