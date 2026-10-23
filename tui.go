@@ -48,6 +48,7 @@ var (
 )
 
 type chatModel struct {
+	contactUI                         contactPage
 	ctx                               context.Context
 	backend                           chatBackend
 	owner, profile                    string
@@ -299,11 +300,12 @@ func (m *chatModel) rebuildRows() {
 		c.Count++
 		peers[v.Peer] = c
 	}
-	if m.newChat {
-		for peer := range m.contacts {
-			if _, ok := peers[peer]; !ok {
-				peers[peer] = chatConversation{Peer: peer}
-			}
+	for peer, contact := range m.contacts {
+		if !m.newChat && !contact.Pinned() {
+			continue
+		}
+		if _, ok := peers[peer]; !ok {
+			peers[peer] = chatConversation{Peer: peer}
 		}
 	}
 	if m.selected != "" {
@@ -464,6 +466,31 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case chatContactResult:
+		m.contactUI.Busy = false
+		if msg.Accepted && msg.Contact.Username != "" {
+			previous := m.contacts[msg.Peer]
+			c := msg.Contact
+			c.Flags = (previous.Flags &^ c.FlagMask) | (c.Flags & c.FlagMask)
+			if len(c.Members) == 0 {
+				c.Members = previous.Members
+			}
+			m.contacts[msg.Peer] = c
+			m.rebuildRows()
+			m.refreshHistory(m.viewport.AtBottom())
+			m.contactUI.Editing = false
+			m.contactUI.Editor.Blur()
+		}
+		if msg.Err != nil {
+			m.contactUI.Notice = "Update failed: " + chatSafeText(msg.Err.Error())
+		} else {
+			m.contactUI.Notice = "Saved to WeChat"
+		}
+		m.notice = m.contactUI.Notice
+		if m.contactUI.Open && !m.contactUI.Editing {
+			return m, m.contactUI.Search.Focus()
+		}
+		return m, nil
 	case chatTranslationResult:
 		delete(m.translationBusy, msg.Key)
 		if msg.Err != nil {
@@ -521,7 +548,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseMsg:
-		if !m.actionsOpen && !m.mediaOpen && !m.profileMenu && !m.help && (msg.Button == tea.MouseButtonLeft || msg.Button == tea.MouseButtonRight) {
+		if !m.contactUI.Open && !m.actionsOpen && !m.mediaOpen && !m.profileMenu && !m.help && (msg.Button == tea.MouseButtonLeft || msg.Button == tea.MouseButtonRight) {
 			return m.mouseAction(msg)
 		}
 	case tea.FocusMsg:
@@ -612,6 +639,9 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshHistory(true)
 		return m, nil
 	case tea.KeyMsg:
+		if m.contactUI.Open {
+			return m.contactKey(msg)
+		}
 		if !msg.Paste {
 			if m.actionsOpen {
 				return m.messageActionKey(msg.String())
@@ -644,6 +674,10 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.help {
+				if msg.String() == "c" {
+					cmd := m.openContacts()
+					return m, cmd
+				}
 				if msg.String() == "ctrl+c" || msg.String() == "ctrl+q" {
 					return m, tea.Quit
 				}
@@ -667,6 +701,9 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.profileMenu = true
 				m.profileChoice = profileIndex(m.profile)
 				return m, nil
+			case "alt+c":
+				cmd := m.openContacts()
+				return m, cmd
 			case "ctrl+g":
 				m.help = true
 				return m, nil
@@ -759,6 +796,9 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.contactUI.Open {
+		return m, nil
+	}
 	var cmd tea.Cmd
 	switch m.focus {
 	case focusSearch:
@@ -791,6 +831,9 @@ func chatPanel(content string, w, h int, focused bool) string {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(color).Padding(0, 1).Width(max(1, w-2)).Height(max(1, h-2)).Render(strings.Join(lines, "\n"))
 }
 func (m chatModel) View() string {
+	if m.contactUI.Open {
+		return m.contactsView()
+	}
 	if m.actionsOpen {
 		return m.messageActionsView()
 	}
@@ -804,7 +847,7 @@ func (m chatModel) View() string {
 		return "WeChat\nResize the terminal to at least 64 × 18.\nCtrl+C to quit."
 	}
 	if m.help {
-		help := "WeChat · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
+		help := "WeChat · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nAlt+C / c here     Contacts: remarks and pinned chats\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, chatPanel(ansi.Wrap(help, m.width-10, ""), min(m.width-4, 78), min(m.height-2, 25), true))
 	}
@@ -1051,7 +1094,7 @@ func (m *chatModel) scheduleRead() tea.Cmd {
 }
 
 func (m *chatModel) scheduleRoster() tea.Cmd {
-	if m.offline || m.profileMenu || m.mediaOpen || m.help || !strings.HasSuffix(m.selected, "@chatroom") || m.rosterLoaded[m.selected] || m.rosterLoading[m.selected] {
+	if m.offline || m.contactUI.Open || m.profileMenu || m.mediaOpen || m.help || !strings.HasSuffix(m.selected, "@chatroom") || m.rosterLoaded[m.selected] || m.rosterLoading[m.selected] {
 		return nil
 	}
 	backend, ok := m.backend.(roomBackend)
@@ -1064,5 +1107,5 @@ func (m *chatModel) scheduleRoster() tea.Cmd {
 }
 
 func (m chatModel) chatVisible() bool {
-	return m.terminalFocused && !m.actionsOpen && !m.profileMenu && !m.mediaOpen && !m.help && m.focus != focusSearch
+	return m.terminalFocused && !m.contactUI.Open && !m.actionsOpen && !m.profileMenu && !m.mediaOpen && !m.help && m.focus != focusSearch
 }

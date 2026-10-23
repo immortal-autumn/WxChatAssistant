@@ -159,3 +159,13 @@ Remaining gaps include session renewal, reconnect handling, phone/LAN device
 verification, official profile import, media transfer, and comprehensive
 contact discovery. Unknown sync commands are retained privately before cursor
 advancement so the current decoder does not discard them.
+
+## Contact updates
+
+Contact management uses authenticated shortlink requests: `/cgi-bin/micromsg-bin/getcontact` (CGI 182) fetches the current contact, and `/cgi-bin/micromsg-bin/oplog` (CGI 681) applies one `ModContact` operation (command 2). Remarks use optional field 10 (SKBuiltinString); pins use only flag mask `0x800`. The request omits unrelated optional properties and retains required identity fields from the fresh contact. Successful changes are journaled as contact updates so they survive restarts and flow through the existing projection.
+
+The oplog response has a top-level integer status and a counted, packed list of per-operation statuses. Both must indicate success before a change is displayed as accepted. No update is automatically retried after a transport error.
+
+Wire references: [GetContact schema](https://github.com/nsky99/wechatclient/blob/main/pkg/wechat_sdk/mmpb/pb/GetContact.proto), [ModContact schema](https://github.com/nsky99/wechatclient/blob/main/pkg/wechat_sdk/mmpb/pb/ModContact.proto), [Oplog schema](https://github.com/nsky99/wechatclient/blob/main/pkg/wechat_sdk/mmpb/pb/Oplog.proto), and the [Ipad860 remark operation](https://github.com/o14547/Ipad860/blob/main/models/Friend/SetRemarks.go). The implementation uses independently encoded protobuf fields rather than copied source code.
+
+Live validation: authenticated self-contact lookup and an empty oplog request succeeded. The empty request submitted no contact changes. Actual remark/pin mutations and their propagation to another device remain unverified; unit tests cover targeted field selection, per-operation rejection, Unicode/empty remarks, and UI save/failure behavior.

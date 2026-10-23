@@ -42,6 +42,7 @@ The conversation list stays visible and the message box stays focused. Messages 
 | Translate / hide translation | Ctrl+T |
 | Download attachment / view image | Ctrl+O, then select and Enter |
 | Choose device profile | Ctrl+P |
+| Contacts page | Alt+C, or Ctrl+G then C |
 | Optional message details | Ctrl+E |
 | Refresh / retry sync | Alt+S |
 | Restore failed send | Ctrl+Y |
@@ -52,6 +53,8 @@ Translations use WeChat's authenticated server API, with no separate translation
 Images render as colored terminal blocks. Image and file downloads are supported; voice/video downloads and media uploads are not implemented. On a remote terminal, opening a URL may require your terminal's Ctrl+click support. Quoted replies are implemented but have not yet been tested with a live send.
 
 Drafts stay with each chat and clear immediately when submitted. Failed sends can restore their draft; interrupted sends are never automatically retried because delivery may be uncertain.
+
+The Contacts page searches known contacts and chats by name, remark, alias, or ID. Tab cycles All / People / Groups / Pinned; Enter opens the selected chat. Ctrl+R edits the contact's WeChat remark (Enter saves, empty removes it); Ctrl+P pins or unpins the chat on WeChat. Esc returns to your draft. Changes require a connection and update the display after server acceptance. Contact lookup and an empty update request were tested live; actual remark/pin changes still need live confirmation. Adding/removing friends is not implemented.
 
 ## CLI commands
 

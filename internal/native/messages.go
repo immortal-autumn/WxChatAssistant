@@ -58,6 +58,10 @@ func (s *Session) authenticated(ctx context.Context, a *Account, command uint32,
 	if command == 0 {
 		path := ""
 		switch cgi {
+		case 182:
+			path = "/cgi-bin/micromsg-bin/getcontact"
+		case 681:
+			path = "/cgi-bin/micromsg-bin/oplog"
 		case 631:
 			path = "/cgi-bin/micromsg-bin/gettranstext"
 		case 222:
