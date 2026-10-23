@@ -58,6 +58,10 @@ func (s *Session) authenticated(ctx context.Context, a *Account, command uint32,
 	if command == 0 {
 		path := ""
 		switch cgi {
+		case 222:
+			path = "/cgi-bin/micromsg-bin/sendappmsg"
+		case 551:
+			path = "/cgi-bin/micromsg-bin/getchatroommemberdetail"
 		case 251:
 			path = "/cgi-bin/micromsg-bin/statusnotify"
 		case 109:
@@ -143,14 +147,20 @@ type SyncBatch struct {
 	Continue bool          `json:"continue"`
 }
 type Message struct {
-	ID        string `json:"id"`
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Peer      string `json:"peer"`
-	Type      int32  `json:"type"`
-	Text      string `json:"text"`
-	Timestamp uint32 `json:"timestamp"`
-	Outgoing  bool   `json:"outgoing"`
+	Sender       string `json:"sender,omitempty"`
+	LegacyID     uint32 `json:"legacy_id,omitempty"`
+	Deleted      bool   `json:"deleted,omitempty"`
+	DeleteNotice string `json:"delete_notice,omitempty"`
+	RecallTarget string `json:"recall_target_id,omitempty"`
+	Hidden       bool   `json:"-"`
+	ID           string `json:"id"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Peer         string `json:"peer"`
+	Type         int32  `json:"type"`
+	Text         string `json:"text"`
+	Timestamp    uint32 `json:"timestamp"`
+	Outgoing     bool   `json:"outgoing"`
 }
 
 func decodeCursor(data []byte) (map[uint64]uint64, error) {
@@ -351,6 +361,12 @@ func DecodeMessage(raw []byte, own string) (Message, error) {
 		hash := md5.Sum(raw)
 		result.ID = fmt.Sprintf("local-%x", hash)
 	}
+	legacy, legacyErr := optionalInt(raw, 1)
+	if legacyErr != nil || (legacy > 0xffffffff && (int32(uint32(legacy)) >= 0 || legacy != uint64(int64(int32(uint32(legacy)))))) {
+		return result, errors.New("invalid legacy message ID")
+	}
+	result.LegacyID = uint32(legacy)
+	NormalizeMessage(&result)
 	return result, nil
 }
 

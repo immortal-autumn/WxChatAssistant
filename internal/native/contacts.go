@@ -4,12 +4,13 @@ import "errors"
 
 // Contact is the subset of a native ModContact needed to identify recipients.
 type Contact struct {
-	Username string `json:"username"`
-	Nickname string `json:"nickname,omitempty"`
-	Remark   string `json:"remark,omitempty"`
-	Alias    string `json:"alias,omitempty"`
-	Flags    uint32 `json:"flags,omitempty"`
-	FlagMask uint32 `json:"flag_mask,omitempty"`
+	Members  map[string]string `json:"members,omitempty"`
+	Username string            `json:"username"`
+	Nickname string            `json:"nickname,omitempty"`
+	Remark   string            `json:"remark,omitempty"`
+	Alias    string            `json:"alias,omitempty"`
+	Flags    uint32            `json:"flags,omitempty"`
+	FlagMask uint32            `json:"flag_mask,omitempty"`
 }
 
 func DecodeContact(raw []byte) (Contact, error) {
@@ -49,6 +50,7 @@ func DecodeContact(raw []byte) (Contact, error) {
 	c.FlagMask, c.Flags = uint32(mask), uint32(flags)
 	alias, err := optionalBytes(raw, 30)
 	c.Alias = string(alias)
+	c.Members = contactRoomMembers(raw)
 	return c, err
 }
 
