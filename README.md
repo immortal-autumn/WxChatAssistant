@@ -1,87 +1,76 @@
 # wechat-cli
 
-A standalone Go CLI for Tencent's WeChat **iLink bot** API. No OpenClaw or Node.js required.
+A standalone Go CLI for personal WeChat messages using the native desktop protocol. No WeChat desktop process, OpenClaw, Rust daemon, or bridge service is required. The original iLink/ClawBot backend remains available with `--backend ilink`.
 
-Supports QR login in your terminal and as a PNG, verification codes, QR refresh, saved credentials, receiving messages, and sending text replies.
-
-This is a bot conversation client, **not a personal WeChat inbox client**. It cannot enumerate your personal contacts, fetch your chat history, or send arbitrary messages to friends. Your WeChat account/app must support the iLink / ClawBot pairing flow. Incoming attachments are shown as placeholders (full metadata is available with `--json`); media upload/download is not implemented.
-
-For accounts that cannot use ClawBot, a separate [native desktop protocol investigation](docs/native-protocol.md) now includes a Go MMTLS probe that verifies Tencent's native server and fetches a normal desktop QR. It is not yet an account login or messaging backend; `wechat login` still uses iLink.
+**Experimental:** native login occupies a desktop session and can log out another computer using the same account. Coexistence with another desktop client is not implemented. Authentication and initial sync have succeeded on a real account; outgoing delivery has not yet been live tested.
 
 ## Build
 
 Requires Go 1.25 or newer.
 
-Install directly from GitHub:
-
-```sh
-go install github.com/kevmo314/wechat-cli@latest
-wechat-cli --help
-```
-
-Or build a local binary named `wechat`:
-
 ```sh
 go build -o bin/wechat .
 ./bin/wechat --help
+# Or: go install github.com/kevmo314/wechat-cli@latest
+# The installed command is named wechat-cli.
 ```
 
-## Login and exchange messages
+## Use
 
 ```sh
-# Scan the terminal QR in WeChat; confirm on your phone.
-# Enter the verification code if prompted. No image viewer is needed.
+# Scan the terminal QR and approve on your phone.
 ./bin/wechat login
-# Optionally save the same QR as a PNG too:
+# Optional PNG output, in addition to the terminal QR:
 ./bin/wechat login --qr login.png
 ./bin/wechat status
 
-# Send a message to the paired bot from your phone, then receive it.
+# Synchronize available messages and keep receiving updates.
 ./bin/wechat read --follow
+./bin/wechat read --json
 
-# In another terminal, list IDs learned from incoming messages and reply.
+# Browse messages already synchronized by this CLI.
+./bin/wechat history --limit 50
 ./bin/wechat contacts
-./bin/wechat send --to 'USER_ID_FROM_READ' --text 'Hello from Go!'
-printf 'A multiline\nreply\n' | ./bin/wechat send --to 'USER_ID_FROM_READ' --stdin
+
+# Use a native username/wxid or chatroom ID learned from read/contacts.
+./bin/wechat send --to 'RECIPIENT_ID' --text 'Hello from Go!'
+printf 'A multiline\nmessage\n' | ./bin/wechat send --to 'RECIPIENT_ID' --stdin
 ```
 
-`login` always renders a black-on-white QR in the terminal, including over SSH and on dark backgrounds. If the server supplies a JPEG/PNG image URL or a base64 image, the CLI scans it and renders the actual pairing payload instead of encoding the image URL or image bytes. Plain pairing links remain supported. QR refreshes are rendered automatically; `--qr FILE.png` saves the same decoded payload as a PNG.
+`read` drains available sync pages and exits. `--follow` checks for updates every three seconds after draining them. It stops on transport/session errors; session renewal and automatic reconnection are not implemented. Run `read` again after a temporary connection failure. An expired or superseded authorization requires another phone-approved login. Sends are never automatically retried because an interrupted response can leave delivery uncertain.
 
-`read` without `--follow` performs one long poll (normally up to 40 seconds). It returns successfully with no output when no messages arrive. `--follow` retries transport failures with bounded backoff and stops on API errors. Ctrl-C stops polling. An expired session (`-14`) requires another login.
+`read --json` and `history` output one decoded message per JSON line. Messages include server ID, sender, recipient, peer, message type, content, timestamp, and direction. Non-text content may contain raw XML or other native payload text; media downloading and rich formatting are not implemented. `contacts` lists peer IDs observed in the local archive, rather than fetching a complete address book.
 
-`read --json` emits each original message as one JSON line, preserving message IDs and unknown fields. This output includes conversation context tokens and any media metadata; treat it as private. Example:
+**History scope:** first-login sync can return existing messages. Our first approved account synchronized 503 messages. This does not establish that all conversations or all historical messages are available. `history` only reads this CLI's local archive. Phone migration/backup and official desktop database import are not implemented.
 
-```sh
-./bin/wechat read --follow --json | jq -c '{from: .from_user_id, items: .item_list}'
-```
+The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. A saved temporary QR/approval can be resumed with `login --resume` until it expires. New-device phone/LAN verification challenges are detected but not implemented.
 
-Replies use the most recently received `context_token` for the recipient. Run `read` first. If a token expires, have the user send a fresh message and receive it before replying. You can override it with `send --context-token TOKEN`. The CLI does not automatically retry sends because a network failure can leave delivery uncertain.
+## State and concurrency
 
-## Local state
+State defaults to `~/.config/wechat-cli` on Linux, respecting `XDG_CONFIG_HOME`. Native state lives in its `native/` subdirectory, separately from existing iLink state. Credentials and approval grants are plaintext, private files (`0600` in `0700` directories). Do not share the config directory or sync journals.
 
-Credentials, conversation tokens, and the polling cursor are saved in `state.json` under the OS user config directory (`~/.config/wechat-cli` on Linux, respecting `XDG_CONFIG_HOME`). New directories use mode `0700`; state files use `0600`. State is plaintext, not encrypted. Do not share it.
+All sync commands, including unknown types, are archived under `native/batches/` before the cursor is committed. `history` deduplicates messages by account and message ID. If output is interrupted after a cursor commit, inspect `history` to recover the archived messages. Files are written atomically and synced to disk.
 
-Use a separate config directory per account; global flags go **before** the command:
+Only one reader/login/logout process can run per config directory. Sending can run alongside a reader; account updates are serialized. Multiple processes do not provide additional desktop sessions.
 
 ```sh
+# Global flags must precede the command.
 ./bin/wechat --config-dir ~/.config/wechat-work login
 ./bin/wechat --config-dir ~/.config/wechat-work read --follow
 ./bin/wechat logout
 ```
 
-`logout` clears local state; it does not revoke the binding in WeChat. Remove that in the app if needed. Delete any saved login PNG after pairing.
+`logout` deletes local credentials and cursor but retains the archive. It does not remotely revoke the device authorization; manage that on your phone. It also does not restore a desktop session displaced during login.
 
-Only one `read`, `login`, or `logout` process can run per config directory. `send`, `contacts`, and `status` can run alongside a reader. State updates use a lock and atomic replacement. A receive batch is checkpointed after successful output, so interruption may replay messages; consumers should deduplicate by message ID. The CLI does not archive messages locally.
+## Protocol and validation
 
-Do not run the OpenClaw plugin and this CLI against the same bot simultaneously: they can compete for updates.
+The Go implementation verifies MMTLS server signatures and encrypted records, then uses encrypted native protobuf calls for QR request/poll, phone-grant authentication, sync, and text sends. It follows the inspected Linux 4.1.13.26 profile. There is no insecure signature-verification switch. Request notice checksums currently use zero; the tested server accepted QR, authentication, and sync requests, but compatibility with other accounts/builds is not established.
 
-## Protocol reference and validation
-
-Implemented against [Tencent/openclaw-weixin](https://github.com/Tencent/openclaw-weixin), its [protocol reference](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md), and QR/API/message source code. Reviewed upstream commit `874637a0dbc24050f72d1385add4fc6170a2d726`, plugin version `2.4.10`. The CLI declares its own `WeChatCLI/0.1.0` agent identity and uses the plugin's compatible iLink version headers. It is an independent client, not an official Tencent product.
+See [native protocol findings](docs/native-protocol.md) for the inspected official binary, route IDs, protocol references, and live validation limits. See [iLink usage](docs/ilink.md) for the original bot backend. This is an independent client, not an official Tencent product.
 
 ```sh
 go test -race ./...
 go vet ./...
 ```
 
-Tests use a local HTTP server for QR refresh/verification, request headers, polling cursors, message payloads, error handling, cancellation, and concurrent state updates. QR tests scan JPEG/base64/HTTP fixtures, reconstruct and scan the rendered terminal glyphs, verify matching PNG output, and reject malformed/oversized images. A live smoke check also successfully fetched a QR code from Tencent and generated a valid PNG; the unscanned login timed out as expected. Authenticated receive/send and end-to-end delivery still require pairing with a real WeChat account.
+Tests cover authenticated transport records, encrypted business fixtures, phone approval/challenge handling, cursor merge/reset, send-receipt identity matching, unknown sync payload retention, private archive permissions, replay deduplication, and separation from bot credentials. Existing iLink HTTP and QR image/rendering tests remain in place. Live tests have verified native QR login and account synchronization; no outgoing message was sent during implementation.

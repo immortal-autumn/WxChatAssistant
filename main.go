@@ -17,21 +17,23 @@ import (
 	"time"
 )
 
-const usage = `wechat — standalone Tencent iLink bot CLI
+const usage = `wechat — standalone Go WeChat CLI
 
-Usage: wechat [--config-dir DIR] COMMAND [OPTIONS]
+Usage: wechat [--config-dir DIR] [--backend native|ilink] COMMAND [OPTIONS]
 
   login    [--qr FILE.png] [--timeout 8m]   Pair using a WeChat QR code
-  read     [--follow] [--json]             Receive messages (one poll by default)
-  send     --to USER [--text TEXT | --stdin] [--context-token TOKEN]
+  read     [--follow] [--json]             Synchronize available messages
+  send     --to USER [--text TEXT | --stdin]
   contacts                               List users seen by read
+  history  [--limit N]                    Browse the native local archive
   status                                 Show local account details
   logout                                 Remove local credentials and cursor
   version                                Print CLI version
 
 Global options must precede the command. Use COMMAND --help for options.
-Read a message first to cache the conversation token needed for replies.
-This accesses iLink bot conversations, not your full personal WeChat inbox.
+The default native backend uses desktop QR login and native sync (experimental).
+Use --backend ilink for the original ClawBot API and existing bot credentials.
+Native history contains messages synchronized by this client, not all past chats.
 `
 
 func main() {
@@ -62,6 +64,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	root := flags("wechat")
 	dir := root.String("config-dir", filepath.Join(config, "wechat-cli"), "directory for private account state")
+	backend := root.String("backend", "native", "native desktop protocol or ilink bot API")
 	root.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	if err := root.Parse(args); err != nil {
 		return err
@@ -76,10 +79,16 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 	if command == "version" {
-		fmt.Println("wechat-cli 0.1.0 (iLink compatibility " + protocolVersion + ")")
+		fmt.Println("wechat-cli 0.2.0 (native desktop experimental; iLink compatibility " + protocolVersion + ")")
 		return nil
 	}
 	store := Store{*dir}
+	if *backend == "native" {
+		return nativeCommand(ctx, store, command, args)
+	}
+	if *backend != "ilink" {
+		return errors.New("backend must be native or ilink")
+	}
 	switch command {
 	case "login":
 		return login(ctx, store, args)

@@ -259,6 +259,7 @@ type Session struct {
 	received                   int
 	Region, CertificateVersion uint32
 	pending                    []byte
+	rpcSequence                uint32
 }
 
 func (s *Session) Close() error { return s.conn.Close() }
@@ -495,4 +496,36 @@ func (s *Session) receive() (uint32, uint32, []byte, error) {
 
 func (s *Session) String() string {
 	return fmt.Sprintf("MMTLS authenticated (region %d, certificate %d)", s.Region, s.CertificateVersion)
+}
+
+func (s *Session) rpc(ctx context.Context, command uint32, payload []byte) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	if err := s.conn.SetDeadline(deadline); err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { s.conn.Close() })
+	defer stop()
+	s.received = 0
+	s.rpcSequence++
+	if s.rpcSequence == 0 {
+		return nil, errors.New("native request sequence exhausted")
+	}
+	if err := s.send(command, s.rpcSequence, payload); err != nil {
+		return nil, err
+	}
+	for range 32 {
+		c, seq, response, err := s.receive()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+		if seq == s.rpcSequence && (c == command || c == command+1000000000) {
+			return response, nil
+		}
+	}
+	return nil, errors.New("too many unrelated native notifications")
 }

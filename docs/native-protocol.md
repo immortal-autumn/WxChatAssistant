@@ -58,7 +58,7 @@ go run ./tools/native-probe --qr /tmp/native-login.png
 
 This standalone experimental probe uses Go's cryptographic and networking
 primitives. It does not invoke WeChat, Rust, OpenClaw, or a bridge service. It is
-separate from the ordinary `wechat login` bot flow.
+also available through `wechat login`, which now defaults to the native backend. The standalone probe itself remains account-free.
 
 Live results on 2026-10-22:
 
@@ -129,7 +129,33 @@ general-purpose history-download path appeared in that string inventory, but
 string absence is not proof that such a service does not exist. History-related
 protobuf names are present and do not, by themselves, identify callable APIs.
 
-The bot CLI's limitation remains until native phone approval, account
-authentication, session handling, and sync are implemented and live verified.
-No personal account was authenticated and no messages were sent or read during
-this investigation.
+## Integrated Go CLI and approved-account result
+
+The CLI now implements native QR request/poll, phone-grant authentication,
+region redirects, encrypted account session storage, incremental sync, and text
+submission. The old bot backend is selected with `--backend ilink`.
+
+On 2026-10-23 the user scanned and approved a fresh QR. Authentication completed
+and followed the server redirect to `sglong.wechat.com`. Native synchronization
+returned 503 decodable messages across five archived batches, plus other native
+sync commands. This demonstrates some existing-message retrieval on this
+account, not a complete-history API. No message contents or authorization
+material are included in this repository. Outgoing send receipts are covered
+by synthetic tests; no live outgoing message has been sent.
+
+Zero notice checksums were accepted for this account's QR polling,
+authentication, and sync as well as QR retrieval. This remains an experimental
+compatibility choice, rather than a claim of implementing the full official
+client checksum algorithm.
+
+The login displaced the user's other desktop session. The CLI currently uses
+the Linux desktop session class; it has no tested coexistence mode. The
+[reference project's published limitations](https://www.npmjs.com/package/@agent-wechat/agent-wechat)
+also describe a single desktop session. A tablet protocol may be a separate
+research direction, but merely changing the device label is not a validated
+solution.
+
+Remaining gaps include session renewal, reconnect handling, phone/LAN device
+verification, official profile import, media transfer, and comprehensive
+contact discovery. Unknown sync commands are retained privately before cursor
+advancement so the current decoder does not discard them.

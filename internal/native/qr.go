@@ -3,6 +3,7 @@ package native
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -112,7 +113,7 @@ func getInt(data []byte, number uint64) (uint64, error) {
 	return f.scalar, err
 }
 func unbuffer(data []byte) ([]byte, error) {
-	b, err := getBytes(data, 2)
+	b, err := optionalBytes(data, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -177,84 +178,66 @@ func openEnvelope(data, key, aad []byte) ([]byte, error) {
 	return result, err
 }
 
-// ProbeQRCode attempts one account-free native request over the authenticated
-// longlink. The notice checksum is deliberately zero: this is a compatibility
-// probe, not a completed desktop login backend. It never stores approval keys.
-func (s *Session) ProbeQRCode() ([]byte, error) {
+// prelogin performs a signed native business exchange. As in the successful
+// account-free probe, notice checksums are currently zero; rejection is final.
+func (s *Session) prelogin(ctx context.Context, command uint32, cgi uint64, plain, cookie []byte) ([]byte, []byte, error) {
 	pin, ok := businessPins[s.Region]
 	if !ok {
-		return nil, errors.New("unsupported native business region")
+		return nil, nil, errors.New("unsupported native business region")
 	}
-	device, err := randomBytes(16)
-	if err != nil {
-		return nil, err
+	if len(cookie) > 15 {
+		return nil, nil, errors.New("native cookie too large")
 	}
-	device = []byte("l" + hex.EncodeToString(device))
-	device = device[:16]
-	randomKey, err := randomBytes(16)
-	if err != nil {
-		return nil, err
-	}
-	clientVersion := int64(-227271398)
-	base := message(pb(1, []byte{0}), pv(2, 0), pb(3, device), pv(4, uint64(clientVersion)), pb(5, []byte("UnifiedPCLinux x86_64")), pv(6, 0))
-	plain := message(pb(1, base), pb(2, buffer(randomKey)), pv(3, 0), pb(4, []byte("WeChat CLI probe")))
 	local, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	public := local.PublicKey().Bytes()
 	point, err := hex.DecodeString(pin.point)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	peer, err := ecdh.P256().NewPublicKey(point)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	shared, err := local.ECDH(peer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	seed, err := randomBytes(32)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prefix := message([]byte("1415"), public)
 	token, err := sealEnvelope(seed, digest(shared)[:24], digest(prefix))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	derived := expand(mac([]byte("security hdkf expand"), seed), digest(prefix), 56)
 	encrypted, err := sealEnvelope(plain, derived[:24], digest(message(prefix, token)))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	request := message(pv(1, 1), pb(2, message(pv(1, 415), pb(2, public))), pb(3, token), pb(4, nil), pb(5, encrypted))
 	header := make([]byte, 8)
-	for _, v := range []uint64{502, uint64(len(plain)), uint64(len(plain)), pin.version, 0, 0} {
+	header = append(header, cookie...)
+	for _, v := range []uint64{uint64(cgi), uint64(len(plain)), uint64(len(plain)), pin.version, 0, 0} {
 		header = binary.AppendUvarint(header, v)
 	}
 	header = append(header, 0xff, 0, 0, 0, 0, 0, 1)
 	n := len(header) + 3
 	if n > 63 {
-		return nil, errors.New("native business header too large")
+		return nil, nil, errors.New("native business header too large")
 	}
-	flags := uint16(n<<2 | 2 | 12<<12)
+	flags := uint16(n<<2 | 2 | 12<<12 | len(cookie)<<8)
 	packet := message([]byte{0xbf, byte(flags), byte(flags >> 8)}, header, request)
-	// The embedded desktop route table uses longlink command 232 for this
-	// service; its separate business-layer CGI identifier is 502.
-	if err = s.send(232, 1, packet); err != nil {
-		return nil, err
-	}
-	command, sequence, reply, err := s.receive()
+	reply, err := s.rpc(ctx, command, packet)
 	if err != nil {
-		return nil, err
-	}
-	if sequence != 1 || (command != 232 && command != 1000000232) {
-		return nil, fmt.Errorf("native QR route returned command %d, sequence %d", command, sequence)
+		return nil, nil, err
 	}
 	if len(reply) < 11 {
-		return nil, errors.New("short native QR business response")
+		return nil, nil, errors.New("short native QR business response")
 	}
 	offset := 0
 	if reply[0] == 0xbf {
@@ -264,72 +247,50 @@ func (s *Session) ProbeQRCode() ([]byte, error) {
 	boundary := int(flags >> 2 & 63)
 	code := int32(binary.BigEndian.Uint32(reply[offset+2 : offset+6]))
 	if code != 0 {
-		return nil, fmt.Errorf("native QR business status %d", code)
+		return nil, nil, fmt.Errorf("native QR business status %d", code)
 	}
-	if boundary < offset+10 || boundary > len(reply) {
-		return nil, errors.New("invalid native business boundary")
+	if boundary < offset+10+int(flags>>8&15) || boundary > len(reply) {
+		return nil, nil, errors.New("invalid native business boundary")
 	}
 	hybrid := reply[boundary:]
 	remoteKey, err := getBytes(hybrid, 1)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	curve, err := getInt(remoteKey, 1)
 	if err != nil || curve != 415 {
-		return nil, errors.New("unexpected native business curve")
+		return nil, nil, errors.New("unexpected native business curve")
 	}
 	remotePoint, err := getBytes(remoteKey, 2)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	credential, err := getInt(hybrid, 2)
 	if err != nil || credential != 1 {
-		return nil, errors.New("unexpected native business credential")
+		return nil, nil, errors.New("unexpected native business credential")
 	}
 	ciphertext, err := getBytes(hybrid, 3)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	signature, err := getBytes(hybrid, 4)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err = verifySignature(pin.signature, digest(message(encrypted, ciphertext)), signature); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	remote, err := ecdh.P256().NewPublicKey(remotePoint)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	shared, err = local.ECDH(remote)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	response, err := openEnvelope(ciphertext, digest(shared)[:24], digest(message(derived[24:], plain, []byte("415"), remotePoint, []byte("1"))))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	status, err := getBytes(response, 1)
-	if err != nil {
-		return nil, err
-	}
-	ret, err := getInt(status, 1)
-	if err != nil {
-		return nil, err
-	}
-	if int32(ret) != 0 {
-		return nil, fmt.Errorf("native QR API status %d", int32(ret))
-	}
-	image, err := getBytes(response, 2)
-	if err != nil {
-		return nil, err
-	}
-	image, err = unbuffer(image)
-	if err != nil {
-		return nil, err
-	}
-	if len(image) < 8 || !bytes.Equal(image[:8], []byte("\x89PNG\r\n\x1a\n")) {
-		return nil, errors.New("native QR returned an unsupported image")
-	}
-	return image, nil
+	return response, append([]byte{}, reply[offset+10:offset+10+int(flags>>8&15)]...), nil
 }
