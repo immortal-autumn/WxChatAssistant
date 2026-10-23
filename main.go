@@ -19,7 +19,10 @@ import (
 
 const usage = `wechat — standalone Go WeChat CLI
 
-Usage: wechat [--config-dir DIR] [--backend native|ilink] COMMAND [OPTIONS]
+Usage: wechat [--config-dir DIR] [--backend native|ilink] [COMMAND] [OPTIONS]
+
+  (no command)                           Open the interactive WeChat client
+  tui      [--offline]                   Open the TUI / browse local history
 
   login    [--qr FILE.png] [--timeout 8m]   Pair using a WeChat QR code
   read     [--follow] [--json]             Synchronize available messages
@@ -69,11 +72,11 @@ func run(ctx context.Context, args []string) error {
 	if err := root.Parse(args); err != nil {
 		return err
 	}
-	if root.NArg() == 0 {
-		fmt.Print(usage)
-		return nil
+	command, commandArgs := "tui", root.Args()
+	if root.NArg() > 0 {
+		command, commandArgs = root.Arg(0), root.Args()[1:]
 	}
-	command, args := root.Arg(0), root.Args()[1:]
+	args = commandArgs
 	if command == "help" {
 		fmt.Print(usage)
 		return nil
@@ -84,6 +87,22 @@ func run(ctx context.Context, args []string) error {
 	}
 	store := Store{*dir}
 	if *backend == "native" {
+		if command == "tui" {
+			explicitDir := false
+			root.Visit(func(f *flag.Flag) {
+				if f.Name == "config-dir" {
+					explicitDir = true
+				}
+			})
+			if !explicitDir {
+				candidate := Store{filepath.Join(config, "wechat-tablet")}
+				state, err := (nativeStore{filepath.Join(candidate.Dir, "native")}).state()
+				if err == nil && state.Account != nil && state.Account.Profile == "android-tablet" {
+					store = candidate
+				}
+			}
+			return nativeTUI(ctx, store, args)
+		}
 		return nativeCommand(ctx, store, command, args)
 	}
 	if *backend != "ilink" {
