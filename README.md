@@ -2,6 +2,10 @@
 
 A standalone Go terminal client for personal WeChat messages. Run `wechat` to open the TUI, or use individual CLI commands. It connects directly through the native protocol; no WeChat desktop app or bridge service is required. The original bot backend remains available with `--backend ilink`.
 
+![WeChat TUI showing pinned chats, unread counts, replies, links, and inline translation](docs/images/tui.png)
+
+*Actual TUI rendered with fictional conversations in offline mode.*
+
 **Experimental:** tablet login and message sync have been tested, with the other clients remaining signed in on the tested account. Desktop login may replace another desktop session. The phone profile has passed QR request/poll tests; full phone login remains untested and may replace your phone session.
 
 ## Build and login
