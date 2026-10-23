@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Public business-layer pins for the same desktop profile as the MMTLS pins.
@@ -227,7 +228,15 @@ func (s *Session) preloginWithProfile(ctx context.Context, p protocolProfile, co
 	}
 	flags := uint16(n<<2 | 2 | 12<<12 | len(cookie)<<8)
 	packet := message([]byte{0xbf, byte(flags), byte(flags >> 8)}, header, request)
-	reply, err := s.rpc(ctx, command, packet)
+	var reply []byte
+	if command == 0 {
+		if cgi != 502 {
+			return nil, nil, errors.New("unsupported shortlink probe route")
+		}
+		reply, err = s.shortExchange(ctx, strings.Replace(s.host, "long", "short", 1), "/cgi-bin/micromsg-bin/getloginqrcode", packet)
+	} else {
+		reply, err = s.rpc(ctx, command, packet)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

@@ -53,7 +53,24 @@ func (s *Session) authenticated(ctx context.Context, a *Account, command uint32,
 		return nil, errors.New("native request header too large")
 	}
 	flags := uint16(n<<2 | 2 | 13<<12 | len(a.Cookie)<<8)
-	reply, err := s.rpc(ctx, command, message([]byte{0xbf, byte(flags), byte(flags >> 8)}, header, encrypted))
+	packet := message([]byte{0xbf, byte(flags), byte(flags >> 8)}, header, encrypted)
+	var reply []byte
+	if command == 0 {
+		path := ""
+		switch cgi {
+		case 251:
+			path = "/cgi-bin/micromsg-bin/statusnotify"
+		case 109:
+			path = "/cgi-bin/micromsg-bin/getmsgimg"
+		case 106:
+			path = "/cgi-bin/micromsg-bin/downloadappattach"
+		default:
+			return nil, errors.New("unsupported shortlink route")
+		}
+		reply, err = s.shortExchange(ctx, a.shortHost(), path, packet)
+	} else {
+		reply, err = s.rpc(ctx, command, packet)
+	}
 	if err != nil {
 		return nil, err
 	}

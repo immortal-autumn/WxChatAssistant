@@ -8,6 +8,8 @@ type Contact struct {
 	Nickname string `json:"nickname,omitempty"`
 	Remark   string `json:"remark,omitempty"`
 	Alias    string `json:"alias,omitempty"`
+	Flags    uint32 `json:"flags,omitempty"`
+	FlagMask uint32 `json:"flag_mask,omitempty"`
 }
 
 func DecodeContact(raw []byte) (Contact, error) {
@@ -36,7 +38,18 @@ func DecodeContact(raw []byte) (Contact, error) {
 	if err != nil {
 		return c, err
 	}
+	mask, err := optionalInt(raw, 7)
+	if err != nil {
+		return c, err
+	}
+	flags, err := optionalInt(raw, 8)
+	if err != nil {
+		return c, err
+	}
+	c.FlagMask, c.Flags = uint32(mask), uint32(flags)
 	alias, err := optionalBytes(raw, 30)
 	c.Alias = string(alias)
 	return c, err
 }
+
+func (c Contact) Pinned() bool { return c.Flags&0x800 != 0 }

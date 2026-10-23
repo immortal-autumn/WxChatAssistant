@@ -260,6 +260,9 @@ type Session struct {
 	Region, CertificateVersion uint32
 	pending                    []byte
 	rpcSequence                uint32
+	host                       string
+	accessPSK                  []byte
+	shortTicket                shortTicket
 }
 
 func (s *Session) Close() error { return s.conn.Close() }
@@ -306,7 +309,7 @@ func Connect(ctx context.Context, host string) (_ *Session, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{conn: conn}
+	s := &Session{conn: conn, host: host}
 	defer func() {
 		if err != nil {
 			conn.Close()
@@ -393,6 +396,11 @@ func Connect(ctx context.Context, host string) (_ *Session, err error) {
 	if err != nil {
 		return nil, err
 	}
+	accessPSK := expand(secret, append([]byte("PSK_ACCESS"), digest(transcript)...), 32)
+	accessTicket, err := parseShortTicket(ticket)
+	if err != nil {
+		return nil, err
+	}
 	top := cursor{data: ticket}
 	ticketBody := cursor{data: top.sized(4)}
 	if ticketBody.number(1) != 4 {
@@ -428,6 +436,7 @@ func Connect(ctx context.Context, host string) (_ *Session, err error) {
 	}
 	expanded := expand(secret, append([]byte("expanded secret"), digest(transcript)...), 32)
 	s.traffic = deriveTraffic(expanded, "application data key expansion", transcript)
+	s.accessPSK, s.shortTicket = accessPSK, accessTicket
 	s.Region = peer.region
 	s.CertificateVersion = peer.version
 	s.outgoing = 2

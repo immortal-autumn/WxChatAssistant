@@ -83,6 +83,15 @@ func (s *Session) StartLogin(ctx context.Context, host string) (*LoginAttempt, e
 
 // StartLoginWithProfile starts an isolated experimental tablet or desktop attempt.
 func (s *Session) StartLoginWithProfile(ctx context.Context, host, name string) (*LoginAttempt, error) {
+	return s.startLogin(ctx, host, name, 232)
+}
+
+// StartShortLoginProbe exercises the authenticated HTTP-carried MMTLS path.
+func (s *Session) StartShortLoginProbe(ctx context.Context, host, name string) (*LoginAttempt, error) {
+	return s.startLogin(ctx, host, name, 0)
+}
+
+func (s *Session) startLogin(ctx context.Context, host, name string, command uint32) (*LoginAttempt, error) {
 	p, err := profileFor(name)
 	if err != nil {
 		return nil, err
@@ -102,7 +111,7 @@ func (s *Session) StartLoginWithProfile(ctx context.Context, host, name string) 
 		return nil, err
 	}
 	request := message(pb(1, p.baseRequest(device, 0, 0)), pb(2, buffer(key)), pv(3, 0), pb(4, []byte("WeChat CLI")))
-	response, cookie, err := s.preloginWithProfile(ctx, p, 232, 502, request, nil)
+	response, cookie, err := s.preloginWithProfile(ctx, p, command, 502, request, nil)
 	if err != nil {
 		return nil, err
 	}

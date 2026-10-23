@@ -14,7 +14,8 @@ import (
 
 func main() {
 	host := flag.String("host", "long.weixin.qq.com", "Native Tencent service hostname")
-	profile := flag.String("profile", native.DesktopProfile, "desktop or experimental android-tablet")
+	short := flag.Bool("short", false, "use HTTP-carried authenticated MMTLS for the QR probe")
+	profile := flag.String("profile", native.DesktopProfile, "desktop, tablet, or experimental phone")
 	poll := flag.Bool("poll", false, "poll an unapproved QR once without authenticating or saving credentials")
 	qr := flag.String("qr", "", "Attempt one native QR request and save its image (not a complete login)")
 	flag.Parse()
@@ -29,7 +30,12 @@ func main() {
 	fmt.Println(session)
 	fmt.Println("Server signature, encrypted records, Finished, and NOOP verified; no account login or messages.")
 	if *qr != "" {
-		attempt, err := session.StartLoginWithProfile(ctx, *host, *profile)
+		var attempt *native.LoginAttempt
+		if *short {
+			attempt, err = session.StartShortLoginProbe(ctx, *host, *profile)
+		} else {
+			attempt, err = session.StartLoginWithProfile(ctx, *host, *profile)
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "native QR probe:", err)
 			os.Exit(1)
