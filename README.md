@@ -2,7 +2,7 @@
 
 A standalone Go CLI for personal WeChat messages using the native desktop protocol. No WeChat desktop process, OpenClaw, Rust daemon, or bridge service is required. The original iLink/ClawBot backend remains available with `--backend ilink`.
 
-**Experimental:** native login occupies a desktop session and can log out another computer using the same account. Coexistence with another desktop client is not implemented. Authentication and initial sync have succeeded on a real account; outgoing delivery has not yet been live tested.
+**Experimental:** native login occupies a desktop session and can log out another computer using the same account. Coexistence with another desktop client is not implemented. See the [Android tablet investigation](docs/tablet-protocol.md) for the separate device mode being researched. Authentication and initial sync have succeeded on a real account; outgoing delivery has not yet been live tested.
 
 ## Build
 
