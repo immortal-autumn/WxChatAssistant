@@ -26,7 +26,7 @@ func (s nativeStore) chatSnapshot(owner string) (chatSnapshot, error) {
 		return result, err
 	}
 	sort.Strings(files)
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	for _, path := range files {
 		var record nativeJournal
 		if err = s.load(filepath.Join("batches", filepath.Base(path)), &record); err != nil {
@@ -35,15 +35,18 @@ func (s nativeStore) chatSnapshot(owner string) (chatSnapshot, error) {
 		if record.Owner != owner {
 			continue
 		}
-		for _, m := range record.Messages {
-			if !seen[m.ID] {
-				seen[m.ID] = true
+		for _, m := range record.orderedMessages() {
+			if i, ok := seen[m.ID]; ok {
+				native.MergeMessageOrder(&result.Messages[i], m)
+			} else {
+				seen[m.ID] = len(result.Messages)
 				result.Messages = append(result.Messages, m)
 			}
 		}
 		mergeContacts(result.Contacts, record.Batch.Commands)
 	}
 	native.ProjectMessages(result.Messages)
+	native.SortMessages(result.Messages)
 	return result, nil
 }
 func mergeContacts(contacts map[string]native.Contact, commands []native.SyncCommand) {

@@ -158,6 +158,20 @@ func (m *chatModel) addMessages(messages []native.Message, incoming bool) {
 	for _, v := range messages {
 		native.NormalizeMessage(&v)
 		if m.seen[v.ID] {
+			for i := range m.messages {
+				if m.messages[i].ID == v.ID {
+					native.MergeMessageOrder(&m.messages[i], v)
+					break
+				}
+			}
+			if latest, ok := m.latest[v.Peer]; ok {
+				if latest.ID == v.ID {
+					native.MergeMessageOrder(&latest, v)
+					m.latest[v.Peer] = latest
+				} else if latest.Timestamp == v.Timestamp && v.Sequence != 0 && (latest.Sequence == 0 || v.Sequence > latest.Sequence) {
+					m.latest[v.Peer] = v
+				}
+			}
 			continue
 		}
 		m.seen[v.ID] = true
@@ -165,14 +179,17 @@ func (m *chatModel) addMessages(messages []native.Message, incoming bool) {
 		if incoming && visibleChatMessage(v) {
 			m.activityClock++
 			m.activity[v.Peer] = m.activityClock
-			m.latest[v.Peer] = v
+			previous, ok := m.latest[v.Peer]
+			if !ok || v.Timestamp != previous.Timestamp || v.Sequence == 0 || previous.Sequence == 0 || v.Sequence >= previous.Sequence {
+				m.latest[v.Peer] = v
+			}
 		}
 		if incoming && !v.Outgoing && visibleChatMessage(v) && (v.Peer != m.selected || !m.chatVisible() || !m.viewport.AtBottom()) {
 			m.unread[v.Peer]++
 		}
 	}
 	native.ProjectMessages(m.messages)
-	sort.SliceStable(m.messages, func(i, j int) bool { return m.messages[i].Timestamp < m.messages[j].Timestamp })
+	native.SortMessages(m.messages)
 }
 func visibleChatMessage(v native.Message) bool {
 	if v.Hidden {

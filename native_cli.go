@@ -29,6 +29,29 @@ type nativeJournal struct {
 	Batch    native.SyncBatch `json:"batch"`
 	Messages []native.Message `json:"messages"`
 }
+
+// Recover ordering metadata from raw sync commands saved by older versions.
+func (j nativeJournal) orderedMessages() []native.Message {
+	result := append([]native.Message(nil), j.Messages...)
+	indices := map[string]int{}
+	for i, m := range result {
+		indices[m.ID] = i
+	}
+	for _, cmd := range j.Batch.Commands {
+		if cmd.ID != 5 {
+			continue
+		}
+		m, err := native.DecodeMessage(cmd.Payload, j.Owner)
+		if err != nil {
+			continue
+		}
+		if i, ok := indices[m.ID]; ok {
+			native.MergeMessageOrder(&result[i], m)
+		}
+	}
+	return result
+}
+
 type nativeStore struct{ dir string }
 
 func openNativeStore(s Store) (nativeStore, error) {
@@ -122,7 +145,7 @@ func (s nativeStore) history(owner string) ([]native.Message, error) {
 		return nil, err
 	}
 	sort.Strings(files)
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	var result []native.Message
 	for _, path := range files {
 		var record nativeJournal
@@ -132,15 +155,18 @@ func (s nativeStore) history(owner string) ([]native.Message, error) {
 		if owner != "" && record.Owner != owner {
 			continue
 		}
-		for _, m := range record.Messages {
+		for _, m := range record.orderedMessages() {
 			key := record.Owner + "/" + m.ID
-			if !seen[key] {
-				seen[key] = true
+			if i, ok := seen[key]; ok {
+				native.MergeMessageOrder(&result[i], m)
+			} else {
+				seen[key] = len(result)
 				result = append(result, m)
 			}
 		}
 	}
 	native.ProjectMessages(result)
+	native.SortMessages(result)
 	return result, nil
 }
 

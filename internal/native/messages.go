@@ -153,6 +153,7 @@ type SyncBatch struct {
 	Continue bool          `json:"continue"`
 }
 type Message struct {
+	Sequence     uint32 `json:"sequence,omitempty"`
 	Sender       string `json:"sender,omitempty"`
 	LegacyID     uint32 `json:"legacy_id,omitempty"`
 	Deleted      bool   `json:"deleted,omitempty"`
@@ -357,6 +358,11 @@ func DecodeMessage(raw []byte, own string) (Message, error) {
 		return result, errors.New("invalid native message timestamp")
 	}
 	result.Timestamp = uint32(v)
+	v, err = optionalInt(raw, 13)
+	if err != nil || v > 0xffffffff {
+		return result, errors.New("invalid native message sequence")
+	}
+	result.Sequence = uint32(v)
 	v, err = optionalInt(raw, 12)
 	if err != nil {
 		return result, err

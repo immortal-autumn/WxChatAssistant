@@ -27,6 +27,8 @@ The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images a
 
 The conversation list stays visible and the message box stays focused. Messages have compact sender/time labels and indented wrapped lines. Pinned chats are marked `PIN`; unread counts and terminal notifications indicate incoming messages. Viewed conversations send read-state updates while visible, focused, and scrolled to the bottom.
 
+The native message timestamp has whole-second precision. Messages in the same second are ordered by WeChat's server sequence within each conversation, when available. Old archives recover this sequence from their stored sync payloads; messages without sequence metadata retain arrival order.
+
 | Action | Key |
 | --- | --- |
 | Switch chats | Up / Down |
