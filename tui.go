@@ -51,6 +51,7 @@ type chatModel struct {
 	contactUI                         contactPage
 	ctx                               context.Context
 	backend                           chatBackend
+	journal                           *chatJournalWatcher
 	owner, profile                    string
 	offline                           bool
 	width, height                     int
@@ -71,6 +72,7 @@ type chatModel struct {
 	syncing, sending, paused, help    bool
 	lastSync                          time.Time
 	syncErr, notice                   string
+	journalErr                        string
 	retries                           int
 	pendingPeer, pendingText          string
 	pendingAt                         uint32
@@ -146,9 +148,9 @@ func newChatModel(ctx context.Context, backend chatBackend, owner, profile strin
 }
 func (m chatModel) Init() tea.Cmd {
 	if m.offline {
-		return tea.Batch(m.composer.Focus(), m.attention(false))
+		return tea.Batch(m.composer.Focus(), m.attention(false), m.journalCommand())
 	}
-	return tea.Batch(m.composer.Focus(), m.attention(false), m.syncCommand())
+	return tea.Batch(m.composer.Focus(), m.attention(false), m.syncCommand(), m.journalCommand())
 }
 func (m chatModel) syncCommand() tea.Cmd { return func() tea.Msg { return m.backend.sync(m.ctx) } }
 func chatWait(d time.Duration) tea.Cmd {
@@ -487,6 +489,19 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case chatJournalTick:
+		return m, m.journalCommand()
+	case chatJournalResult:
+		m.journalErr = ""
+		if msg.Err != nil {
+			m.journalErr = "Local history refresh failed: " + chatSafeText(msg.Err.Error())
+		}
+		if len(msg.Messages) == 0 && len(msg.Contacts) == 0 {
+			return m, m.journalWait()
+		}
+		priorUnread := m.totalUnread()
+		m.mergeChatUpdate(msg.Messages, msg.Contacts)
+		return m, tea.Batch(m.journalWait(), m.attention(m.totalUnread() > priorUnread))
 	case chatContactResult:
 		m.contactUI.Busy = false
 		if msg.Accepted && msg.Contact.Username != "" {
@@ -602,18 +617,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		priorUnread := m.totalUnread()
-		bottom := m.viewport.AtBottom()
-		for peer, c := range msg.Contacts {
-			previous := m.contacts[peer]
-			if len(c.Members) == 0 {
-				c.Members = previous.Members
-			}
-			c.Flags = (previous.Flags &^ c.FlagMask) | (c.Flags & c.FlagMask)
-			m.contacts[peer] = c
-		}
-		m.addMessages(msg.Messages, true)
-		m.rebuildRows()
-		m.refreshHistory(bottom)
+		m.mergeChatUpdate(msg.Messages, msg.Contacts)
 		m.lastSync = time.Now()
 		m.syncErr = ""
 		m.retries = 0
@@ -958,6 +962,9 @@ func (m chatModel) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, chatPanel(sidebar, leftW, bodyH, m.focus == focusSearch), chatPanel(thread, rightW, bodyH, m.focus == focusCompose))
 	status := m.notice
 	if status == "" {
+		status = m.journalErr
+	}
+	if status == "" {
 		status = m.syncErr
 	}
 	if status == "" {
@@ -1014,6 +1021,10 @@ func nativeTUI(ctx context.Context, store Store, args []string, requested string
 		}
 		defer reader.Close()
 	}
+	journal, err := newChatJournalWatcher(s, state.Account.Username)
+	if err != nil {
+		return err
+	}
 	data, err := s.chatSnapshot(state.Account.Username)
 	if err != nil {
 		return err
@@ -1021,6 +1032,7 @@ func nativeTUI(ctx context.Context, store Store, args []string, requested string
 	client := &chatService{store: s, owner: state.Account.Username}
 	uiCtx, cancel := context.WithCancel(ctx)
 	model := newChatModel(uiCtx, client, state.Account.Username, state.Account.Profile, data, *offline)
+	model.journal = journal
 	model.language = *language
 	var saved chatDraftState
 	if loadErr := s.load("drafts.json", &saved); loadErr == nil && saved.Owner == model.owner {

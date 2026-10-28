@@ -94,6 +94,8 @@ All sync commands, including unknown types, are archived under `native/batches/`
 
 Only one reader/login/logout process can run per config directory. Sending can run alongside a reader; account updates are serialized. Multiple processes do not provide additional desktop sessions.
 
+The TUI checks new local journal records once per second, so messages sent from a separate CLI process appear without reopening the interface or waiting for a server echo. This local refresh also works while network sync is paused or the TUI is offline. Later server echoes update the same message without adding a duplicate.
+
 ```sh
 # Global flags must precede the command.
 ./bin/WxChatAssistant --config-dir ~/.config/wechat-work login
