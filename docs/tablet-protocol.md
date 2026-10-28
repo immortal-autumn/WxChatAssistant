@@ -158,10 +158,10 @@ current iPad binary's exact packet format.
 go run ./tools/native-probe --profile android-tablet --qr /tmp/tablet.png --poll
 
 # Phone-approved login, with isolated local account state:
-go build -o bin/wechat .
-./bin/wechat --config-dir ~/.config/wechat-tablet login --profile android-tablet
-./bin/wechat --config-dir ~/.config/wechat-tablet read --json
-./bin/wechat --config-dir ~/.config/wechat-tablet history --limit 50
+go build -o bin/WxChatAssistant .
+./bin/WxChatAssistant --config-dir ~/.config/wechat-tablet login --profile android-tablet
+./bin/WxChatAssistant --config-dir ~/.config/wechat-tablet read --json
+./bin/WxChatAssistant --config-dir ~/.config/wechat-tablet history --limit 50
 ```
 
 Live results on 2026-10-23:

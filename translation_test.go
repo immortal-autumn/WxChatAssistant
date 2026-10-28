@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 func TestTranslationDisplayAndDeletedMessages(t *testing.T) {

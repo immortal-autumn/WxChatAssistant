@@ -1,4 +1,4 @@
-module github.com/kevmo314/wechat-cli
+module github.com/immortal-autumn/WxChatAssistant
 
 go 1.25.0
 

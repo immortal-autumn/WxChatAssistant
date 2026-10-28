@@ -16,12 +16,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
-const usage = `wechat — standalone Go WeChat CLI
+const usage = `WxChatAssistant — standalone Go WeChat assistant
 
-Usage: wechat [--config-dir DIR] [--backend native|ilink] [--profile phone|tablet|desktop] [COMMAND] [OPTIONS]
+Usage: WxChatAssistant [--config-dir DIR] [--backend native|ilink] [--profile phone|tablet|desktop] [COMMAND] [OPTIONS]
 
   (no command)                           Open the interactive WeChat client
   tui      [--offline]                   Open the TUI / browse local history
@@ -52,7 +52,7 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) || errors.Is(err, context.Canceled) {
 			return
 		}
-		fmt.Fprintln(os.Stderr, "wechat:", err)
+		fmt.Fprintln(os.Stderr, "WxChatAssistant:", err)
 		os.Exit(1)
 	}
 }
@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	root := flags("wechat")
+	root := flags("WxChatAssistant")
 	dir := root.String("config-dir", filepath.Join(config, "wechat-cli"), "directory for private account state")
 	backend := root.String("backend", "native", "native desktop protocol or ilink bot API")
 	profile := root.String("profile", "", "phone, tablet, or desktop; each uses separate saved credentials")
@@ -89,7 +89,7 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 	if command == "version" {
-		fmt.Println("wechat-cli 0.3.0 (native desktop experimental; iLink compatibility " + protocolVersion + ")")
+		fmt.Println("WxChatAssistant 0.3.0 (native desktop experimental; iLink compatibility " + protocolVersion + ")")
 		return nil
 	}
 	store := Store{*dir}
@@ -185,7 +185,7 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("unknown command %q; use wechat --help", command)
+		return fmt.Errorf("unknown command %q; use WxChatAssistant --help", command)
 	}
 	if command == "logout" {
 		lock, err := store.readerLock()
@@ -227,7 +227,7 @@ func account(store Store) (State, *Client, error) {
 		return s, nil, err
 	}
 	if s.Token == "" {
-		return s, nil, errors.New("not logged in; run wechat login")
+		return s, nil, errors.New("not logged in; run WxChatAssistant login")
 	}
 	base, err := trustedBase(s.BaseURL)
 	if err != nil {
@@ -512,7 +512,7 @@ func sendMessage(ctx context.Context, store Store, args []string) error {
 		*token = state.Contexts[*to]
 	}
 	if *token == "" {
-		return errors.New("no conversation token for recipient; receive their message with wechat read first, or supply --context-token")
+		return errors.New("no conversation token for recipient; receive their message with WxChatAssistant read first, or supply --context-token")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

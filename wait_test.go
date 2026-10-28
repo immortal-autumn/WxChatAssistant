@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 	"testing"
 )
 

@@ -7,18 +7,18 @@ Select this backend with the global `--backend ilink` flag. It uses the original
 ```sh
 # Scan the terminal QR in WeChat; confirm on your phone.
 # Enter the verification code if prompted. No image viewer is needed.
-./bin/wechat --backend ilink login
+./bin/WxChatAssistant --backend ilink login
 # Optionally save the same QR as a PNG too:
-./bin/wechat --backend ilink login --qr login.png
-./bin/wechat --backend ilink status
+./bin/WxChatAssistant --backend ilink login --qr login.png
+./bin/WxChatAssistant --backend ilink status
 
 # Send a message to the paired bot from your phone, then receive it.
-./bin/wechat --backend ilink read --follow
+./bin/WxChatAssistant --backend ilink read --follow
 
 # In another terminal, list IDs learned from incoming messages and reply.
-./bin/wechat --backend ilink contacts
-./bin/wechat --backend ilink send --to 'USER_ID_FROM_READ' --text 'Hello from Go!'
-printf 'A multiline\nreply\n' | ./bin/wechat --backend ilink send --to 'USER_ID_FROM_READ' --stdin
+./bin/WxChatAssistant --backend ilink contacts
+./bin/WxChatAssistant --backend ilink send --to 'USER_ID_FROM_READ' --text 'Hello from Go!'
+printf 'A multiline\nreply\n' | ./bin/WxChatAssistant --backend ilink send --to 'USER_ID_FROM_READ' --stdin
 ```
 
 `login` always renders a black-on-white QR in the terminal, including over SSH and on dark backgrounds. If the server supplies a JPEG/PNG image URL or a base64 image, the CLI scans it and renders the actual pairing payload instead of encoding the image URL or image bytes. Plain pairing links remain supported. QR refreshes are rendered automatically; `--qr FILE.png` saves the same decoded payload as a PNG.
@@ -28,7 +28,7 @@ printf 'A multiline\nreply\n' | ./bin/wechat --backend ilink send --to 'USER_ID_
 `read --json` emits each original message as one JSON line, preserving message IDs and unknown fields. This output includes conversation context tokens and any media metadata; treat it as private. Example:
 
 ```sh
-./bin/wechat --backend ilink read --follow --json | jq -c '{from: .from_user_id, items: .item_list}'
+./bin/WxChatAssistant --backend ilink read --follow --json | jq -c '{from: .from_user_id, items: .item_list}'
 ```
 
 Replies use the most recently received `context_token` for the recipient. Run `read` first. If a token expires, have the user send a fresh message and receive it before replying. You can override it with `send --context-token TOKEN`. The CLI does not automatically retry sends because a network failure can leave delivery uncertain.
@@ -40,9 +40,9 @@ Credentials, conversation tokens, and the polling cursor are saved in `state.jso
 Use a separate config directory per account; global flags go **before** the command:
 
 ```sh
-./bin/wechat --backend ilink --config-dir ~/.config/wechat-work login
-./bin/wechat --backend ilink --config-dir ~/.config/wechat-work read --follow
-./bin/wechat --backend ilink logout
+./bin/WxChatAssistant --backend ilink --config-dir ~/.config/wechat-work login
+./bin/WxChatAssistant --backend ilink --config-dir ~/.config/wechat-work read --follow
+./bin/WxChatAssistant --backend ilink logout
 ```
 
 `logout` clears local state; it does not revoke the binding in WeChat. Remove that in the app if needed. Delete any saved login PNG after pairing.

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 func waitMatches(m native.Message, peer string, since uint32) bool {
@@ -42,7 +42,7 @@ func waitMessage(ctx context.Context, store Store, args []string) error {
 		return err
 	}
 	if state.Account == nil {
-		return errors.New("not logged in; run wechat login first")
+		return errors.New("not logged in; run WxChatAssistant login first")
 	}
 	since := uint32(time.Now().Unix())
 	owner := state.Account.Username

@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 type attachmentBackend interface {

@@ -1,27 +1,31 @@
-# wechat-cli
+# WxChatAssistant
 
-A standalone Go terminal client for personal WeChat messages. Run `wechat` to open the TUI, or use individual CLI commands. It connects directly through the native protocol; no WeChat desktop app or bridge service is required. The original bot backend remains available with `--backend ilink`.
+A fork of [kevmo314/wechat-cli](https://github.com/kevmo314/wechat-cli), with fixes for profile/session selection and stable TUI refresh. The upstream history and author attribution are retained.
+
+The command and interface are named `WxChatAssistant`. Existing credentials, drafts, and history use the compatible `wechat-cli` configuration directory, so an existing installation can reuse its saved login.
+
+A standalone Go terminal client for personal WeChat messages. Run `WxChatAssistant` to open the TUI, or use individual CLI commands. It connects directly through the native protocol; no WeChat desktop app or bridge service is required. The original bot backend remains available with `--backend ilink`.
 
 ![WeChat TUI showing pinned chats, unread counts, replies, links, and inline translation](docs/images/tui.png)
 
-*Actual TUI rendered with fictional conversations in offline mode.*
+*Upstream TUI screenshot, rendered with fictional conversations in offline mode.*
 
 **Experimental:** tablet login and message sync have been tested, with the other clients remaining signed in on the tested account. Desktop login may replace another desktop session. The phone profile has passed QR request/poll tests; full phone login remains untested and may replace your phone session.
 
 ## Build and login
 
-Requires Go 1.25 or newer. [GitHub Actions](https://github.com/kevmo314/wechat-cli/actions) produces Linux, macOS, and Windows binaries for amd64 and arm64, with checksums.
+Requires Go 1.25 or newer. [GitHub Actions](https://github.com/immortal-autumn/WxChatAssistant/actions) produces Linux, macOS, and Windows binaries for amd64 and arm64, with checksums.
 
 ```sh
-go build -o bin/wechat .
+go build -o bin/WxChatAssistant .
 # Scan the terminal QR and approve on your phone.
-./bin/wechat --profile tablet login
-./bin/wechat --profile tablet
+./bin/WxChatAssistant --profile tablet login
+./bin/WxChatAssistant --profile tablet
 ```
 
 Choose `--profile phone`, `--profile tablet`, or `--profile desktop`. Each profile keeps separate credentials. The TUI remembers your selected profile and lets you change it with Ctrl+P. Existing tablet state in `~/.config/wechat-tablet` is recognized. Global flags precede the command.
 
-`wechat login --profile tablet` selects the same account directory as `wechat --profile tablet login`. Without a profile flag, `login` uses desktop. If matching saved profiles exist in multiple directories, the CLI reports the paths instead of choosing one silently. Select the intended session and its archive with `wechat --config-dir DIR --profile desktop status` (or `read` / `tui`); existing files are preserved.
+`WxChatAssistant login --profile tablet` selects the same account directory as `WxChatAssistant --profile tablet login`. Without a profile flag, `login` uses desktop. If matching saved profiles exist in multiple directories, the CLI reports the paths instead of choosing one silently. Select the intended session and its archive with `WxChatAssistant --config-dir DIR --profile desktop status` (or `read` / `tui`); existing files are preserved.
 
 The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. `login --qr login.png` also saves an image; `login --resume` resumes an unexpired attempt. New-device phone/LAN verification challenges are detected but not implemented.
 
@@ -63,19 +67,19 @@ The Contacts page searches known contacts and chats by name, remark, alias, or I
 ## CLI commands
 
 ```sh
-./bin/wechat status
-./bin/wechat read --follow
-./bin/wechat history --limit 50
-./bin/wechat contacts
-./bin/wechat send --to RECIPIENT_ID --text 'Hello!'
-./bin/wechat send --to RECIPIENT_ID --text 'Reply' --reply-to MESSAGE_ID
-./bin/wechat wait --timeout 60s --json
-./bin/wechat wait --from RECIPIENT_ID --json
-./bin/wechat attachment --id MESSAGE_ID --preview
-./bin/wechat translate --text '你好，世界' --lang en
-./bin/wechat translate --id MESSAGE_ID --lang en
-./bin/wechat mark-read --to RECIPIENT_ID
-./bin/wechat tui --offline
+./bin/WxChatAssistant status
+./bin/WxChatAssistant read --follow
+./bin/WxChatAssistant history --limit 50
+./bin/WxChatAssistant contacts
+./bin/WxChatAssistant send --to RECIPIENT_ID --text 'Hello!'
+./bin/WxChatAssistant send --to RECIPIENT_ID --text 'Reply' --reply-to MESSAGE_ID
+./bin/WxChatAssistant wait --timeout 60s --json
+./bin/WxChatAssistant wait --from RECIPIENT_ID --json
+./bin/WxChatAssistant attachment --id MESSAGE_ID --preview
+./bin/WxChatAssistant translate --text '你好，世界' --lang en
+./bin/WxChatAssistant translate --id MESSAGE_ID --lang en
+./bin/WxChatAssistant mark-read --to RECIPIENT_ID
+./bin/WxChatAssistant tui --offline
 ```
 
 Use `--help` on a command for options. `wait` returns the next new incoming message and works alongside the TUI by observing its sync journal. With no reader running, it performs sync itself. A timeout exits unsuccessfully. `read` drains available sync pages; `--follow` continues polling. `read --json` and `history` emit one message per JSON line.
@@ -92,9 +96,9 @@ Only one reader/login/logout process can run per config directory. Sending can r
 
 ```sh
 # Global flags must precede the command.
-./bin/wechat --config-dir ~/.config/wechat-work login
-./bin/wechat --config-dir ~/.config/wechat-work read --follow
-./bin/wechat logout
+./bin/WxChatAssistant --config-dir ~/.config/wechat-work login
+./bin/WxChatAssistant --config-dir ~/.config/wechat-work read --follow
+./bin/WxChatAssistant logout
 ```
 
 `logout` deletes local credentials and cursor but retains the archive. It does not remotely revoke the device authorization; manage that on your phone. It also does not restore a desktop session displaced during login.

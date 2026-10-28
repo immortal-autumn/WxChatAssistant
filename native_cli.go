@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 type nativeState struct {
@@ -267,7 +267,7 @@ func nativeCommand(ctx context.Context, store Store, command string, args []stri
 		}
 		return nil
 	default:
-		return fmt.Errorf("unknown native command %q; use wechat --help", command)
+		return fmt.Errorf("unknown native command %q; use WxChatAssistant --help", command)
 	}
 }
 
@@ -416,7 +416,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	if err = os.Remove(filepath.Join(s.dir, "login.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	fmt.Println("Native login complete. Run `wechat read` to synchronize messages.")
+	fmt.Println("Native login complete. Run `WxChatAssistant read` to synchronize messages.")
 	return nil
 }
 
@@ -437,7 +437,7 @@ func nativeRead(ctx context.Context, store Store, s nativeStore, args []string) 
 		return err
 	}
 	if state.Account == nil {
-		return errors.New("not logged in natively; run wechat login")
+		return errors.New("not logged in natively; run WxChatAssistant login")
 	}
 	connection, err := native.Connect(ctx, state.Account.Host)
 	if err != nil {
@@ -555,7 +555,7 @@ func nativeSend(ctx context.Context, s nativeStore, args []string) error {
 		return err
 	}
 	if state.Account == nil {
-		return errors.New("not logged in natively; run wechat login")
+		return errors.New("not logged in natively; run WxChatAssistant login")
 	}
 	service := &chatService{store: s, owner: state.Account.Username}
 	var result chatSendResult

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 func saveProfileFixture(t *testing.T, store Store, profile string) {

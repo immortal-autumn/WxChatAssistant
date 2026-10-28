@@ -36,7 +36,7 @@ type APIError struct{ Code int }
 
 func (e *APIError) Error() string {
 	if e.Code == -14 {
-		return "WeChat session expired (-14); run wechat login again"
+		return "WeChat session expired (-14); run WxChatAssistant login again"
 	}
 	return fmt.Sprintf("WeChat API error %d", e.Code)
 }

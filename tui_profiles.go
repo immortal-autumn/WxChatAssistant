@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 type profileOption struct{ Name, Label, Detail string }
@@ -40,7 +40,7 @@ func profileIndex(profile string) int {
 func profilePickerView(index, w, h int) string {
 	width := min(76, max(32, w-6))
 	var lines []string
-	lines = append(lines, chatTitle.Render("Choose a WeChat profile"), "", chatDim.Render("Each profile keeps its own credentials and message archive."), "")
+	lines = append(lines, chatTitle.Render("Choose a WxChatAssistant profile"), "", chatDim.Render("Each profile keeps its own credentials and message archive."), "")
 	for i, p := range chatProfiles {
 		prefix := "  "
 		if i == index {

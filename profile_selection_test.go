@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 	"path/filepath"
 	"testing"
 )

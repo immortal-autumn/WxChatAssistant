@@ -20,7 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 type chatBackend interface {
@@ -861,10 +861,10 @@ func (m chatModel) View() string {
 		return profilePickerView(m.profileChoice, m.width, m.height)
 	}
 	if m.width < 64 || m.height < 18 {
-		return "WeChat\nResize the terminal to at least 64 × 18.\nCtrl+C to quit."
+		return "WxChatAssistant\nResize the terminal to at least 64 × 18.\nCtrl+C to quit."
 	}
 	if m.help {
-		help := "WeChat · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nAlt+C / c here     Contacts: remarks and pinned chats\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
+		help := "WxChatAssistant · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nAlt+C / c here     Contacts: remarks and pinned chats\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, chatPanel(ansi.Wrap(help, m.width-10, ""), min(m.width-4, 78), min(m.height-2, 25), true))
 	}
@@ -882,11 +882,12 @@ func (m chatModel) View() string {
 		state = "Sync stopped · Alt+S retry"
 	}
 	profile := profileLabel(m.profile)
-	brandText := "●  WeChat"
+	brandText := "●  WxChatAssistant"
 	if n := m.totalUnread(); n > 0 {
 		brandText += fmt.Sprintf(" · %d unread", n)
 	}
 	brand := chatTitle.Render(brandText) + chatDim.Render("  "+profile)
+	brand = ansi.Truncate(brand, max(1, m.width-lipgloss.Width(state)-2), "…")
 	top := brand + strings.Repeat(" ", max(1, m.width-lipgloss.Width(brand)-lipgloss.Width(state)-2)) + chatDim.Render(state)
 	leftW := min(34, max(24, m.width/3))
 	bodyH := m.height - 3
@@ -939,7 +940,7 @@ func (m chatModel) View() string {
 	}
 	name := m.name(m.selected)
 	if m.selected == "" {
-		name = "Welcome to WeChat"
+		name = "Welcome to WxChatAssistant"
 	}
 	inner := rightW - 4
 	header := ansi.Truncate(chatTitle.Render(name)+chatDim.Render("  "+oneLine(m.selected)), inner, "…") + "\n" + chatDim.Render(strings.Repeat("─", inner))
@@ -977,7 +978,7 @@ func nativeTUI(ctx context.Context, store Store, args []string, requested string
 		return errors.New("invalid translation language")
 	}
 	if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stdout.Fd()) {
-		return errors.New("the TUI requires a terminal; use wechat read --json or wechat history for pipelines")
+		return errors.New("the TUI requires a terminal; use WxChatAssistant read --json or WxChatAssistant history for pipelines")
 	}
 	s, err := openNativeStore(store)
 	if err != nil {
@@ -989,7 +990,7 @@ func nativeTUI(ctx context.Context, store Store, args []string, requested string
 	}
 	if state.Account == nil {
 		if *offline {
-			return errors.New("no saved account; run wechat login first")
+			return errors.New("no saved account; run WxChatAssistant login first")
 		}
 		if requested == "" {
 			choice, err := chooseProfile(ctx)
@@ -1073,9 +1074,9 @@ func (m chatModel) totalUnread() int {
 	return n
 }
 func (m chatModel) attention(bell bool) tea.Cmd {
-	title := "WeChat"
+	title := "WxChatAssistant"
 	if n := m.totalUnread(); n > 0 {
-		title = fmt.Sprintf("WeChat — %d unread", n)
+		title = fmt.Sprintf("WxChatAssistant — %d unread", n)
 	}
 	var notify tea.Cmd
 	if bell {

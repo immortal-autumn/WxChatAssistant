@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevmo314/wechat-cli/internal/native"
+	"github.com/immortal-autumn/WxChatAssistant/internal/native"
 )
 
 type chatSnapshot struct {
@@ -107,7 +107,7 @@ func (c *chatService) sync(ctx context.Context) chatSyncResult {
 	defer lock.Close()
 	state, err := c.store.state()
 	if err == nil && (state.Account == nil || state.Account.Username != c.owner) {
-		err = errors.New("account changed; reopen WeChat")
+		err = errors.New("account changed; reopen WxChatAssistant")
 	}
 	if err == nil && (c.session == nil || c.host != state.Account.Host) {
 		if c.session != nil {
@@ -169,7 +169,7 @@ func (c *chatService) deliver(ctx context.Context, peer, text string, reply *nat
 	defer lock.Close()
 	state, err := c.store.state()
 	if err == nil && (state.Account == nil || state.Account.Username != c.owner) {
-		err = errors.New("account changed; reopen WeChat")
+		err = errors.New("account changed; reopen WxChatAssistant")
 	}
 	if err != nil {
 		result.Err = err
