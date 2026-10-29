@@ -91,12 +91,7 @@ func (m chatModel) journalWait() tea.Cmd {
 func (m *chatModel) mergeChatUpdate(messages []native.Message, contacts map[string]native.Contact) {
 	bottom := m.viewport.AtBottom()
 	for peer, c := range contacts {
-		previous := m.contacts[peer]
-		if len(c.Members) == 0 {
-			c.Members = previous.Members
-		}
-		c.Flags = (previous.Flags &^ c.FlagMask) | (c.Flags & c.FlagMask)
-		m.contacts[peer] = c
+		m.contacts[peer] = native.MergeContact(m.contacts[peer], c)
 	}
 	m.addMessages(messages, true)
 	m.rebuildRows()

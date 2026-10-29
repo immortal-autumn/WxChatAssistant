@@ -38,6 +38,7 @@ The native message timestamp has whole-second precision. Messages in the same se
 | Action | Key |
 | --- | --- |
 | Switch chats | Up / Down |
+| Next / previous chat category | Tab / Shift+Tab |
 | Scroll messages | PgUp / PgDn |
 | Send | Enter or Ctrl+S |
 | New line | Alt+Enter or Ctrl+J |
@@ -60,11 +61,15 @@ Translations use WeChat's authenticated server API, with no separate translation
 
 Missing group names are fetched in the background, with the selected group first and at most one lookup per second. Results are saved in the local journal and reused on restart, including offline. Alt+S retries failed lookups. When a real group name is unavailable, cached member names provide a stable `Group · …` label until the name can be retrieved.
 
+The default **Main** list folds official accounts and muted groups, including pinned ones. Tab / Shift+Tab cycles **Main / People / Groups / Official / Muted / All**. Groups includes muted groups; All shows every archived or pinned conversation. Search stays within the current category; Ctrl+N searches all known contacts. Classification uses synchronized contact metadata and works offline. A group with an unknown notification setting stays in Main. These views do not change WeChat subscriptions or notification settings.
+
+Folded chats keep their individual unread badges, but do not ring the terminal bell or increase its attention count. New messages stay in their category. If a settings update folds the chat currently being edited, its recipient and draft remain open until you navigate elsewhere. Each restart opens Main.
+
 Images render as colored terminal blocks. Image and file downloads are supported; voice/video downloads and media uploads are not implemented. On a remote terminal, opening a URL may require your terminal's Ctrl+click support. Quoted replies are implemented but have not yet been tested with a live send.
 
 Drafts stay with each chat and clear immediately when submitted. Failed sends can restore their draft; interrupted sends are never automatically retried because delivery may be uncertain.
 
-The Contacts page searches known contacts and chats by name, remark, alias, or ID. Tab cycles All / People / Groups / Pinned; Enter opens the selected chat. Ctrl+R edits the contact's WeChat remark (Enter saves, empty removes it); Ctrl+P pins or unpins the chat on WeChat. Esc returns to your draft. Changes require a connection and update the display after server acceptance. Contact lookup and an empty update request were tested live; actual remark/pin changes still need live confirmation. Adding/removing friends is not implemented.
+The Contacts page searches known contacts and chats by name, remark, alias, or ID. Tab cycles All / People / Groups / Pinned / Official / Muted; Enter opens the selected chat and reveals folded chats in All when needed. People excludes official accounts. Ctrl+R edits the contact's WeChat remark (Enter saves, empty removes it); Ctrl+P pins or unpins the chat on WeChat. Esc returns to your draft. Changes require a connection and update the display after server acceptance. Contact lookup and an empty update request were tested live; actual remark/pin changes still need live confirmation. Adding/removing friends is not implemented.
 
 ## CLI commands
 

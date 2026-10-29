@@ -19,7 +19,7 @@ type contactPage struct {
 	EditPeer, Notice    string
 }
 
-var contactFilters = []string{"All", "People", "Groups", "Pinned"}
+var contactFilters = []string{"All", "People", "Groups", "Pinned", "Official", "Muted"}
 
 func (m *chatModel) openContacts() tea.Cmd {
 	search := textinput.New()
@@ -58,9 +58,8 @@ func (m chatModel) contactPeers() []string {
 		if peer == "" {
 			continue
 		}
-		c := m.contacts[peer]
-		group := strings.HasSuffix(peer, "@chatroom")
-		if (m.contactUI.Filter == 1 && group) || (m.contactUI.Filter == 2 && !group) || (m.contactUI.Filter == 3 && !c.Pinned()) {
+		c := m.contact(peer)
+		if (m.contactUI.Filter == 1 && (c.Group() || c.Official())) || (m.contactUI.Filter == 2 && !c.Group()) || (m.contactUI.Filter == 3 && !c.Pinned()) || (m.contactUI.Filter == 4 && !c.Official()) || (m.contactUI.Filter == 5 && !c.Muted()) {
 			continue
 		}
 		text := strings.Join([]string{peer, c.Nickname, c.Remark, c.Alias, m.name(peer)}, " ")
@@ -174,6 +173,11 @@ func (m chatModel) contactKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if peer := m.contactPeer(); peer != "" {
 				ui.Open = false
+				if !m.matchesChatFilter(peer, m.chatFilter) {
+					m.chatFilter = chatFilterAll
+				}
+				m.query = ""
+				m.search.SetValue("")
 				m.selectPeer(peer)
 				m.rebuildRows()
 				return m, m.setFocus(focusCompose)
@@ -220,7 +224,7 @@ func (m chatModel) contactsView() string {
 		filters = append(filters, name)
 	}
 	peers := m.contactPeers()
-	lines := []string{chatTitle.Render("CONTACTS") + chatDim.Render(fmt.Sprintf("  %d known contacts / chats", len(peers))), chatDim.Render(strings.Join(filters, "   ")), m.contactUI.Search.View(), ""}
+	lines := []string{chatTitle.Render("CONTACTS") + chatDim.Render(fmt.Sprintf("  %d known contacts / chats", len(peers))), chatDim.Render(ansi.Truncate(strings.Join(filters, " · "), inner, "…")), m.contactUI.Search.View(), ""}
 	slots := max(1, m.height-16)
 	index := min(m.contactUI.Index, max(0, len(peers)-1))
 	start := min(max(0, index-slots/2), max(0, len(peers)-slots))
@@ -232,6 +236,12 @@ func (m chatModel) contactsView() string {
 		}
 		if strings.HasSuffix(peer, "@chatroom") {
 			suffix += " · Group"
+		}
+		if m.contact(peer).Official() {
+			suffix += " · Official"
+		}
+		if m.contact(peer).Muted() {
+			suffix += " · Muted"
 		}
 		style := lipgloss.NewStyle()
 		if i == index {

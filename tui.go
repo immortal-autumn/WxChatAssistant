@@ -69,6 +69,7 @@ type chatModel struct {
 	unread                            map[string]int
 	query                             string
 	newChat                           bool
+	chatFilter                        chatFilter
 	syncing, sending, paused, help    bool
 	lastSync                          time.Time
 	syncErr, notice                   string
@@ -345,6 +346,9 @@ func (m *chatModel) rebuildRows() {
 	m.rows = nil
 	query := strings.ToLower(strings.TrimSpace(m.query))
 	for peer, c := range peers {
+		if !m.matchesChatFilter(peer, m.chatFilter) {
+			continue
+		}
 		if latest, ok := m.latest[peer]; ok {
 			c.Last = latest
 		}
@@ -368,7 +372,7 @@ func (m *chatModel) rebuildRows() {
 		}
 		return m.rows[i].Peer < m.rows[j].Peer
 	})
-	if len(m.rows) == 0 && m.newChat && strings.TrimSpace(m.query) != "" && !strings.ContainsAny(m.query, " \n\r\t") {
+	if len(m.rows) == 0 && m.newChat && strings.TrimSpace(m.query) != "" && !strings.ContainsAny(m.query, " \n\r\t") && m.matchesChatFilter(strings.TrimSpace(m.query), m.chatFilter) {
 		m.rows = []chatConversation{{Peer: strings.TrimSpace(m.query)}}
 	}
 	m.selectedIndex = -1
@@ -378,7 +382,7 @@ func (m *chatModel) rebuildRows() {
 			break
 		}
 	}
-	if m.selectedIndex < 0 && len(m.rows) > 0 {
+	if m.selected == "" && len(m.rows) > 0 {
 		m.selectPeer(m.rows[0].Peer)
 		m.selectedIndex = 0
 	}
@@ -509,9 +513,9 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.Messages) == 0 && len(msg.Contacts) == 0 {
 			return m, m.journalWait()
 		}
-		priorUnread := m.totalUnread()
+		priorUnread := m.attentionUnread()
 		m.mergeChatUpdate(msg.Messages, msg.Contacts)
-		return m, tea.Batch(m.journalWait(), m.attention(m.totalUnread() > priorUnread))
+		return m, tea.Batch(m.journalWait(), m.attention(m.attentionUnread() > priorUnread))
 	case chatGroupContactResult:
 		m.groupNameBusy = false
 		m.groupNameErr = ""
@@ -526,13 +530,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatContactResult:
 		m.contactUI.Busy = false
 		if msg.Accepted && msg.Contact.Username != "" {
-			previous := m.contacts[msg.Peer]
-			c := msg.Contact
-			c.Flags = (previous.Flags &^ c.FlagMask) | (c.Flags & c.FlagMask)
-			if len(c.Members) == 0 {
-				c.Members = previous.Members
-			}
-			m.contacts[msg.Peer] = c
+			m.contacts[msg.Peer] = native.MergeContact(m.contacts[msg.Peer], msg.Contact)
 			m.rebuildRows()
 			m.refreshHistory(m.viewport.AtBottom())
 			m.contactUI.Editing = false
@@ -638,16 +636,16 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.paused = true
 			return m, nil
 		}
-		priorUnread := m.totalUnread()
+		priorUnread := m.attentionUnread()
 		m.mergeChatUpdate(msg.Messages, msg.Contacts)
 		m.lastSync = time.Now()
 		m.syncErr = ""
 		m.retries = 0
 		if msg.More {
 			m.syncing = true
-			return m, tea.Batch(m.syncCommand(), m.attention(m.totalUnread() > priorUnread))
+			return m, tea.Batch(m.syncCommand(), m.attention(m.attentionUnread() > priorUnread))
 		}
-		return m, tea.Batch(chatWait(3*time.Second), m.attention(m.totalUnread() > priorUnread))
+		return m, tea.Batch(chatWait(3*time.Second), m.attention(m.attentionUnread() > priorUnread))
 	case chatSendResult:
 		m.sending = false
 		if msg.Accepted {
@@ -755,6 +753,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.setFocus(focusSearch)
 			case "ctrl+n":
 				m.newChat = true
+				m.chatFilter = chatFilterAll
 				m.query = ""
 				m.search.SetValue("")
 				m.rebuildRows()
@@ -816,7 +815,12 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuildRows()
 				return m, m.setFocus(focusCompose)
 			case "tab", "shift+tab":
-				return m, nil
+				direction := 1
+				if msg.String() == "shift+tab" {
+					direction = -1
+				}
+				m.cycleChatFilter(direction)
+				return m, m.attention(false)
 			case "up", "down":
 				if len(m.rows) > 0 {
 					delta := 1
@@ -834,6 +838,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.notice = "No matching contact"
 						return m, nil
 					}
+					m.selectFirstMatchingChat()
 					return m, m.setFocus(focusCompose)
 				}
 				return m, m.submit()
@@ -851,6 +856,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.query != m.search.Value() {
 			m.query = m.search.Value()
 			m.rebuildRows()
+			m.selectFirstMatchingChat()
 			m.refreshHistory(true)
 		}
 	case focusCompose:
@@ -892,7 +898,7 @@ func (m chatModel) View() string {
 		return "WxChatAssistant\nResize the terminal to at least 64 × 18.\nCtrl+C to quit."
 	}
 	if m.help {
-		help := "WxChatAssistant · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nAlt+C / c here     Contacts: remarks and pinned chats\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
+		help := "WxChatAssistant · keyboard shortcuts\n\n↑ ↓                 Switch chats; composer stays focused\nTab / Shift+Tab     Next / previous chat category\nPgUp / PgDn         Scroll conversation history\nEnter / Ctrl+S      Send message\nAlt+Enter           New line in the message\nCtrl+K / Ctrl+N     Search conversations / new chat\nMouse click          Select message / open its link\nRight-click / Ctrl+R Reply immediately\nClick quoted preview Jump to original quoted message\nCtrl+E              Optional message details\nCtrl+T              Translate selected message / hide translation\nCtrl+X              Cancel the selected reply target\nCtrl+O              Attachments and image previews\nCtrl+P              Choose phone / tablet / desktop\nAlt+C / c here     Contacts: remarks and pinned chats\nCtrl+G / Esc        Help / close current view\nCtrl+Y              Restore a failed send\nAlt+S               Refresh or retry synchronization\nCtrl+Home / End     Oldest / newest message\nCtrl+C / Ctrl+Q     Quit (drafts are saved)\n\nImages and files can be downloaded. Voice/video downloads and media uploads\nare not implemented. Read state syncs only while the active chat is visible."
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, chatPanel(ansi.Wrap(help, m.width-10, ""), min(m.width-4, 78), min(m.height-2, 25), true))
 	}
@@ -911,7 +917,7 @@ func (m chatModel) View() string {
 	}
 	profile := profileLabel(m.profile)
 	brandText := "●  WxChatAssistant"
-	if n := m.totalUnread(); n > 0 {
+	if n := m.attentionUnread(); n > 0 {
 		brandText += fmt.Sprintf(" · %d unread", n)
 	}
 	brand := chatTitle.Render(brandText) + chatDim.Render("  "+profile)
@@ -921,11 +927,11 @@ func (m chatModel) View() string {
 	bodyH := m.height - 3
 	rightW := m.width - leftW
 	leftInner := leftW - 4
-	title := "CONVERSATIONS"
+	title := "CHATS"
 	if m.newChat {
 		title = "CONTACTS"
 	}
-	sidebar := chatTitle.Render(title) + chatDim.Render(fmt.Sprintf("  %d", len(m.rows))) + "\n"
+	sidebar := chatTitle.Render(title+" · "+m.chatFilter.label()) + chatDim.Render(fmt.Sprintf("  %d", len(m.rows))) + "\n"
 	if m.focus == focusSearch {
 		sidebar += m.search.View()
 	} else if m.query != "" {
@@ -933,11 +939,21 @@ func (m chatModel) View() string {
 	} else {
 		sidebar += chatDim.Render("/ Search    n New chat")
 	}
-	sidebar += "\n\n"
+	hint := "Tab → " + m.chatFilter.next(1).label()
+	if n := m.foldedConversations(); m.chatFilter == chatFilterMain && n > 0 {
+		hint = fmt.Sprintf("Tab · %d folded", n)
+	}
+	sidebar += "\n" + chatDim.Render(ansi.Truncate(hint, leftInner, "…")) + "\n"
 	slots := max(1, (m.height-8)/3)
 	for i := m.listOffset; i < min(len(m.rows), m.listOffset+slots); i++ {
 		row := m.rows[i]
 		name := m.name(row.Peer)
+		if m.contact(row.Peer).Official() {
+			name = "PUB · " + name
+		}
+		if m.contact(row.Peer).Muted() {
+			name = "MUTE · " + name
+		}
 		if m.contacts[row.Peer].Pinned() {
 			name = "PIN · " + name
 		}
@@ -997,7 +1013,7 @@ func (m chatModel) View() string {
 	if status == "" {
 		status = "Drafts stay with each conversation.  Messages are sent only on Enter or Ctrl+S."
 	}
-	footer := " ↑↓ chats · PgUp/Dn scroll · Ctrl+R reply · Ctrl+T translate · Ctrl+G help · Ctrl+Q quit"
+	footer := " Tab categories · ↑↓ chats · PgUp/Dn scroll · Ctrl+R reply · Ctrl+G help · Ctrl+Q quit"
 	return top + "\n" + body + "\n" + chatDim.Render(ansi.Truncate(oneLine(status), m.width, "…")) + "\n" + chatDim.Render(ansi.Truncate(footer, m.width, "…"))
 }
 
@@ -1114,7 +1130,7 @@ func (m chatModel) totalUnread() int {
 }
 func (m chatModel) attention(bell bool) tea.Cmd {
 	title := "WxChatAssistant"
-	if n := m.totalUnread(); n > 0 {
+	if n := m.attentionUnread(); n > 0 {
 		title = fmt.Sprintf("WxChatAssistant — %d unread", n)
 	}
 	var notify tea.Cmd

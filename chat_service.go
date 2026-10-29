@@ -66,15 +66,18 @@ func (s nativeStore) chatSnapshot(owner string) (chatSnapshot, error) {
 }
 func mergeContacts(contacts map[string]native.Contact, commands []native.SyncCommand) {
 	for _, cmd := range commands {
-		if cmd.ID == 2 {
-			if c, err := native.DecodeContact(cmd.Payload); err == nil {
-				previous := contacts[c.Username]
-				c.Flags = (previous.Flags & ^c.FlagMask) | (c.Flags & c.FlagMask)
-				if len(c.Members) == 0 {
-					c.Members = previous.Members
-				}
-				contacts[c.Username] = c
-			}
+		var c native.Contact
+		var err error
+		switch cmd.ID {
+		case 2:
+			c, err = native.DecodeContact(cmd.Payload)
+		case 20:
+			c, err = native.DecodeChatRoomNotify(cmd.Payload)
+		default:
+			continue
+		}
+		if err == nil {
+			contacts[c.Username] = native.MergeContact(contacts[c.Username], c)
 		}
 	}
 }
