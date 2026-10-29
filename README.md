@@ -58,6 +58,8 @@ The native message timestamp has whole-second precision. Messages in the same se
 
 Translations use WeChat's authenticated server API, with no separate translation account or API key. English is the default; use `tui --language zh_CN` to change it. Translations appear below the original and are cached privately. Deleted messages are marked and cannot be quoted or translated. Group names use contact and group-member data when available.
 
+Missing group names are fetched in the background, with the selected group first and at most one lookup per second. Results are saved in the local journal and reused on restart, including offline. Alt+S retries failed lookups. When a real group name is unavailable, cached member names provide a stable `Group · …` label until the name can be retrieved.
+
 Images render as colored terminal blocks. Image and file downloads are supported; voice/video downloads and media uploads are not implemented. On a remote terminal, opening a URL may require your terminal's Ctrl+click support. Quoted replies are implemented but have not yet been tested with a live send.
 
 Drafts stay with each chat and clear immediately when submitted. Failed sends can restore their draft; interrupted sends are never automatically retried because delivery may be uncertain.

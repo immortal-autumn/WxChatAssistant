@@ -73,6 +73,7 @@ type chatModel struct {
 	lastSync                          time.Time
 	syncErr, notice                   string
 	journalErr                        string
+	groupNameErr                      string
 	retries                           int
 	pendingPeer, pendingText          string
 	pendingAt                         uint32
@@ -105,6 +106,9 @@ type chatModel struct {
 	readAttempted                     map[string]bool
 	rosterLoaded                      map[string]bool
 	rosterLoading                     map[string]bool
+	groupNameAttempted                map[string]bool
+	groupNameBusy                     bool
+	nextGroupNameLookup               time.Time
 	readBusy                          bool
 	profileMenu                       bool
 	profileChoice                     int
@@ -132,7 +136,8 @@ func newChatModel(ctx context.Context, backend chatBackend, owner, profile strin
 		focus: focusCompose, search: search, composer: composer, viewport: viewport.New(60, 12),
 		contacts: data.Contacts, seen: map[string]bool{}, drafts: map[string]string{}, unread: map[string]int{},
 		rosterLoaded: map[string]bool{}, rosterLoading: map[string]bool{},
-		readScheduled: map[string]bool{}, readAttempted: map[string]bool{},
+		groupNameAttempted: map[string]bool{},
+		readScheduled:      map[string]bool{}, readAttempted: map[string]bool{},
 		failedDrafts: map[string]string{}, expandedQuotes: map[string]bool{}, translations: map[string]string{}, translationBusy: map[string]bool{}, language: "en", replyTargets: map[string]native.Message{}, failedReplyTargets: map[string]native.Message{}, activity: map[string]uint64{}, latest: map[string]native.Message{},
 		terminalFocused: true, width: 100, height: 30,
 	}
@@ -218,6 +223,11 @@ func (m chatModel) name(peer string) string {
 		for _, name := range []string{c.Remark, c.Nickname, c.Alias} {
 			if name = oneLine(name); name != "" {
 				return name
+			}
+		}
+		if strings.HasSuffix(peer, "@chatroom") {
+			if label := groupMemberSummary(c.Members, m.owner); label != "" {
+				return label
 			}
 		}
 	}
@@ -485,7 +495,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok && (key.String() == "ctrl+c" || key.String() == "ctrl+q") {
 		return next, cmd
 	}
-	return next, tea.Batch(cmd, next.scheduleRead(), next.scheduleRoster())
+	return next, tea.Batch(cmd, next.scheduleRead(), next.scheduleRoster(), next.scheduleGroupNames())
 }
 func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -502,6 +512,17 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		priorUnread := m.totalUnread()
 		m.mergeChatUpdate(msg.Messages, msg.Contacts)
 		return m, tea.Batch(m.journalWait(), m.attention(m.totalUnread() > priorUnread))
+	case chatGroupContactResult:
+		m.groupNameBusy = false
+		m.groupNameErr = ""
+		if msg.Err != nil {
+			m.groupNameErr = "Group name unavailable · Alt+S retries"
+		} else if msg.Contact.Username != msg.Peer {
+			m.groupNameErr = "Group name lookup returned a different group"
+		} else {
+			m.mergeChatUpdate(nil, map[string]native.Contact{msg.Peer: msg.Contact})
+		}
+		return m, nil
 	case chatContactResult:
 		m.contactUI.Busy = false
 		if msg.Accepted && msg.Contact.Username != "" {
@@ -551,6 +572,7 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			c := m.contacts[msg.Peer]
 			c.Members = msg.Members
 			m.contacts[msg.Peer] = c
+			m.rebuildRows()
 			m.refreshHistory(m.viewport.AtBottom())
 		}
 		return m, nil
@@ -745,6 +767,8 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "alt+s":
+				m.groupNameAttempted = map[string]bool{}
+				m.nextGroupNameLookup = time.Time{}
 				if !m.syncing && !m.offline {
 					m.paused = false
 					m.syncing = true
@@ -966,6 +990,9 @@ func (m chatModel) View() string {
 	}
 	if status == "" {
 		status = m.syncErr
+	}
+	if status == "" {
+		status = m.groupNameErr
 	}
 	if status == "" {
 		status = "Drafts stay with each conversation.  Messages are sent only on Enter or Ctrl+S."

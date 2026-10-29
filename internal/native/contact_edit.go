@@ -169,7 +169,12 @@ func contactUpdatePayload(raw []byte, peer string, change ContactChange) ([]byte
 	return request, projected, nil
 }
 
-func (s *Session) fetchContact(ctx context.Context, a *Account, peer string) ([]byte, error) {
+// FetchContact reads an existing contact or group without changing its properties.
+// The raw ModContact is returned so callers can persist it in the sync journal.
+func (s *Session) FetchContact(ctx context.Context, a *Account, peer string) ([]byte, error) {
+	if peer == "" || len(peer) > 512 || !utf8.ValidString(peer) || containsControl(peer) {
+		return nil, errors.New("invalid contact ID")
+	}
 	if err := a.Validate(); err != nil {
 		return nil, err
 	}
@@ -179,6 +184,11 @@ func (s *Session) fetchContact(ctx context.Context, a *Account, peer string) ([]
 	if err != nil {
 		return nil, err
 	}
+	return decodeContactLookup(response, peer)
+}
+
+func decodeContactLookup(response []byte, peer string) ([]byte, error) {
+	var err error
 	if err = requireSuccess(response); err != nil {
 		return nil, err
 	}
@@ -186,12 +196,46 @@ func (s *Session) fetchContact(ctx context.Context, a *Account, peer string) ([]
 	if err != nil || count != 1 {
 		return nil, errors.New("contact lookup did not return exactly one contact")
 	}
+	fs, err := fields(response)
+	if err != nil {
+		return nil, err
+	}
+	var codes []uint64
+	for _, f := range fs {
+		if f.number != 4 {
+			continue
+		}
+		switch f.wire {
+		case 0:
+			codes = append(codes, f.scalar)
+		case 2:
+			for data := f.data; len(data) > 0; {
+				code, n := binary.Uvarint(data)
+				if n <= 0 {
+					return nil, errors.New("invalid contact lookup status")
+				}
+				codes = append(codes, code)
+				data = data[n:]
+			}
+		default:
+			return nil, errors.New("invalid contact lookup status type")
+		}
+	}
+	if len(codes) > 1 {
+		return nil, errors.New("unexpected contact lookup status count")
+	}
+	if len(codes) == 1 && int32(codes[0]) != 0 {
+		return nil, fmt.Errorf("contact lookup returned status %d", int32(codes[0]))
+	}
 	raw, err := getBytes(response, 3)
 	if err != nil {
 		return nil, err
 	}
 	contact, err := DecodeContact(raw)
-	if err != nil || contact.Username != peer {
+	if err != nil {
+		return nil, fmt.Errorf("invalid contact lookup result: %w", err)
+	}
+	if contact.Username != peer {
 		return nil, errors.New("contact response identity mismatch")
 	}
 	return raw, nil
@@ -201,7 +245,7 @@ func (s *Session) UpdateContact(ctx context.Context, a *Account, peer string, ch
 	if err := change.Validate(peer); err != nil {
 		return nil, err
 	}
-	raw, err := s.fetchContact(ctx, a, peer)
+	raw, err := s.FetchContact(ctx, a, peer)
 	if err != nil {
 		return nil, err
 	}

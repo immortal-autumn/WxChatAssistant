@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,20 @@ func (s nativeStore) chatSnapshot(owner string) (chatSnapshot, error) {
 			}
 		}
 		mergeContacts(result.Contacts, record.Batch.Commands)
+	}
+	var rooms chatRoomCache
+	if err := s.load("rooms.json", &rooms); err == nil && rooms.Owner == owner {
+		for peer, entry := range rooms.Rooms {
+			if !strings.HasSuffix(peer, "@chatroom") {
+				continue
+			}
+			contact := result.Contacts[peer]
+			if len(contact.Members) == 0 && len(entry.Members) > 0 {
+				contact.Username = peer
+				contact.Members = entry.Members
+				result.Contacts[peer] = contact
+			}
+		}
 	}
 	native.ProjectMessages(result.Messages)
 	native.SortMessages(result.Messages)
