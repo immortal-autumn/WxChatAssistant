@@ -223,12 +223,12 @@ func (m chatModel) name(peer string) string {
 	if c, ok := m.contacts[peer]; ok {
 		for _, name := range []string{c.Remark, c.Nickname, c.Alias} {
 			if name = oneLine(name); name != "" {
-				return name
+				return chatDisplayText(name)
 			}
 		}
 		if strings.HasSuffix(peer, "@chatroom") {
 			if label := groupMemberSummary(c.Members, m.owner); label != "" {
-				return label
+				return chatDisplayText(label)
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (m chatModel) name(peer string) string {
 	if peer == "filehelper" {
 		return "File Transfer"
 	}
-	return oneLine(peer)
+	return chatDisplayLabel(peer)
 }
 func xmlText(s, element string) string {
 	if len(s) > 128*1024 {
@@ -352,7 +352,8 @@ func (m *chatModel) rebuildRows() {
 		if latest, ok := m.latest[peer]; ok {
 			c.Last = latest
 		}
-		if query != "" && !strings.Contains(strings.ToLower(m.name(c.Peer)+" "+c.Peer+" "+m.contacts[c.Peer].Alias), query) {
+		contact := m.contacts[c.Peer]
+		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{m.name(c.Peer), c.Peer, contact.Alias, contact.Nickname, contact.Remark}, " ")), query) {
 			continue
 		}
 		m.rows = append(m.rows, c)
@@ -877,7 +878,7 @@ func chatPanel(content string, w, h int, focused bool) string {
 		lines = lines[:max(1, h-2)]
 	}
 	for i, line := range lines {
-		lines[i] = ansi.Truncate(line, max(1, w-4), "…")
+		lines[i] = ansi.Truncate(chatDisplayText(line), max(1, w-4), "…")
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(color).Padding(0, 1).Width(max(1, w-2)).Height(max(1, h-2)).Render(strings.Join(lines, "\n"))
 }
@@ -967,9 +968,13 @@ func (m chatModel) View() string {
 		if draft := m.drafts[row.Peer]; draft != "" {
 			preview = "Draft: " + oneLine(draft)
 		}
-		text := ansi.Truncate(name, leftInner, "…") + "\n" + ansi.Truncate(preview, leftInner, "…")
+		name = ansi.Truncate(chatDisplayLabel(name), leftInner, "…")
+		preview = ansi.Truncate(chatDisplayLabel(preview), leftInner, "…")
+		// Pad each of the two physical lines before styling. A wrapping style
+		// must never change a chat row's height or its mouse hit position.
+		text := name + strings.Repeat(" ", max(0, leftInner-ansi.StringWidth(name))) + "\n" + preview + strings.Repeat(" ", max(0, leftInner-ansi.StringWidth(preview)))
 		if row.Peer == m.selected {
-			text = lipgloss.NewStyle().Background(lipgloss.Color("#174b37")).Foreground(lipgloss.Color("#ffffff")).Width(leftInner).Render(text)
+			text = lipgloss.NewStyle().Background(lipgloss.Color("#174b37")).Foreground(lipgloss.Color("#ffffff")).Render(text)
 		} else {
 			text = chatDim.Render(text)
 		}
@@ -1014,7 +1019,9 @@ func (m chatModel) View() string {
 		status = "Drafts stay with each conversation.  Messages are sent only on Enter or Ctrl+S."
 	}
 	footer := " Tab categories · ↑↓ chats · PgUp/Dn scroll · Ctrl+R reply · Ctrl+G help · Ctrl+Q quit"
-	return top + "\n" + body + "\n" + chatDim.Render(ansi.Truncate(oneLine(status), m.width, "…")) + "\n" + chatDim.Render(ansi.Truncate(footer, m.width, "…"))
+	// Leave the bottom-right cell unused to avoid pending terminal autowrap
+	// when the renderer returns the cursor to the start of the last row.
+	return top + "\n" + body + "\n" + chatDim.Render(ansi.Truncate(oneLine(status), m.width, "…")) + "\n" + chatDim.Render(ansi.Truncate(footer, m.width-1, "…"))
 }
 
 func nativeTUI(ctx context.Context, store Store, args []string, requested string) error {

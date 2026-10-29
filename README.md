@@ -33,6 +33,8 @@ The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images a
 
 The conversation list stays visible and the message box stays focused. Messages have compact sender/time labels and indented wrapped lines. Pinned chats are marked `PIN`; unread counts and terminal notifications indicate incoming messages. Viewed conversations send read-state updates while visible, focused, and scrolled to the bottom.
 
+Long chat names are truncated to a fixed two-line list row. To keep borders aligned on terminals such as VTE 0.76, the display uses text presentation for emoji variation selectors, shows joined emoji as separate components, and separates skin-tone modifiers. Original contact names, archived messages, draft text, outgoing messages and hyperlink targets are preserved; searches also accept original names.
+
 The native message timestamp has whole-second precision. Messages in the same second are ordered by WeChat's server sequence within each conversation, when available. Old archives recover this sequence from their stored sync payloads; messages without sequence metadata retain arrival order.
 
 | Action | Key |

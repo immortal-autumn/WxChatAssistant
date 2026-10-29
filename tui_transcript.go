@@ -70,7 +70,7 @@ func (m *chatModel) refreshHistory(bottom bool) {
 		} else if v.Sender != "" {
 			sender = m.senderName(v.Peer, v.Sender)
 		}
-		label := ansi.Truncate(sender, max(8, m.viewport.Width/3), "…") + " " + time.Unix(int64(v.Timestamp), 0).Format("15:04") + "  "
+		label := ansi.Truncate(chatDisplayLabel(sender), max(8, m.viewport.Width/3), "…") + " " + time.Unix(int64(v.Timestamp), 0).Format("15:04") + "  "
 		style := chatDim
 		if v.Outgoing {
 			style = chatTitle
@@ -78,7 +78,7 @@ func (m *chatModel) refreshHistory(bottom bool) {
 		if m.manualMessageSelection && m.selectedMessageID == v.ID {
 			style = chatTitle.Bold(true)
 		}
-		text := messagePreview(v)
+		text := chatDisplayText(messagePreview(v))
 		if v.Deleted {
 			text = chatDim.Render(text)
 		}
@@ -103,9 +103,9 @@ func (m *chatModel) refreshHistory(bottom bool) {
 				if name == "" {
 					name = m.replyName(quoted)
 				}
-				quote := name + ": " + oneLine(messagePreview(quoted))
+				quote := chatDisplayLabel(name + ": " + oneLine(messagePreview(quoted)))
 				if m.expandedQuotes[v.ID] {
-					quote = name + ": " + chatSafeText(messagePreview(quoted))
+					quote = chatDisplayText(name + ": " + chatSafeText(messagePreview(quoted)))
 				} else {
 					quote = ansi.Truncate(quote, max(1, m.viewport.Width-5), "…")
 				}
@@ -114,11 +114,11 @@ func (m *chatModel) refreshHistory(bottom bool) {
 			}
 		}
 		if translated := m.translations[m.translationKey(v)]; translated != "" && !v.Deleted {
-			add(chatDim.Render(hangingMessage("  Translation: "+chatSafeText(translated), m.viewport.Width)), chatLineRef{MessageID: v.ID}, nil)
+			add(chatDim.Render(hangingMessage("  Translation: "+chatDisplayText(chatSafeText(translated)), m.viewport.Width)), chatLineRef{MessageID: v.ID}, nil)
 		}
 	}
 	if m.sending && m.pendingPeer == m.selected {
-		add(hangingMessage(chatDim.Render("You · sending  ")+chatSafeText(m.pendingText), m.viewport.Width), chatLineRef{}, nil)
+		add(hangingMessage(chatDim.Render("You · sending  ")+chatDisplayText(chatSafeText(m.pendingText)), m.viewport.Width), chatLineRef{}, nil)
 	}
 	if len(lines) == 0 {
 		add(chatDim.Render("No messages yet.\n\nType below to start a conversation."), chatLineRef{}, nil)
