@@ -35,6 +35,8 @@ The conversation list stays visible and the message box stays focused. Messages 
 
 Long chat names are truncated to a fixed two-line list row. To keep borders aligned on terminals such as VTE 0.76, the display uses text presentation for emoji variation selectors, shows joined emoji as separate components, and separates skin-tone modifiers. Original contact names, archived messages, draft text, outgoing messages and hyperlink targets are preserved; searches also accept original names.
 
+Holding Up / Down stops at the first or last conversation without repeating title updates. Unicode line and paragraph separators in displayed messages become physical line breaks before wrapping. Panels clip and pad their content to fixed dimensions without another word-wrap pass, so rapid chat switching keeps the frame aligned.
+
 The native message timestamp has whole-second precision. Messages in the same second are ordered by WeChat's server sequence within each conversation, when available. Old archives recover this sequence from their stored sync payloads; messages without sequence metadata retain arrival order.
 
 | Action | Key |

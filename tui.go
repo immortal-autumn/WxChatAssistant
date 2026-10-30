@@ -823,15 +823,20 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cycleChatFilter(direction)
 				return m, m.attention(false)
 			case "up", "down":
-				if len(m.rows) > 0 {
-					delta := 1
-					if msg.String() == "up" {
-						delta = -1
-					}
-					m.selectedIndex = max(0, min(len(m.rows)-1, m.selectedIndex+delta))
-					m.selectPeer(m.rows[m.selectedIndex].Peer)
-					m.ensureListVisible()
+				if len(m.rows) == 0 {
+					return m, nil
 				}
+				delta := 1
+				if msg.String() == "up" {
+					delta = -1
+				}
+				index := max(0, min(len(m.rows)-1, m.selectedIndex+delta))
+				if index == m.selectedIndex && m.rows[index].Peer == m.selected {
+					return m, nil
+				}
+				m.selectedIndex = index
+				m.selectPeer(m.rows[index].Peer)
+				m.ensureListVisible()
 				return m, m.attention(false)
 			case "enter":
 				if m.focus == focusSearch {
@@ -873,14 +878,18 @@ func chatPanel(content string, w, h int, focused bool) string {
 	if focused {
 		color = chatGreen
 	}
-	lines := strings.Split(content, "\n")
+	// Normalize structural Unicode separators before counting physical rows.
+	lines := strings.Split(chatDisplayText(content), "\n")
 	if len(lines) > max(1, h-2) {
 		lines = lines[:max(1, h-2)]
 	}
 	for i, line := range lines {
-		lines[i] = ansi.Truncate(chatDisplayText(line), max(1, w-4), "…")
+		line = ansi.Truncate(line, max(1, w-4), "…")
+		lines[i] = line + strings.Repeat(" ", max(0, w-4-ansi.StringWidth(line)))
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(color).Padding(0, 1).Width(max(1, w-2)).Height(max(1, h-2)).Render(strings.Join(lines, "\n"))
+	// Lines are already sized. Setting Width here would run another word-wrap
+	// pass over styled content and could move rows during rapid navigation.
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(color).Padding(0, 1).Height(max(1, h-2)).Render(strings.Join(lines, "\n"))
 }
 func (m chatModel) View() string {
 	if m.contactUI.Open {

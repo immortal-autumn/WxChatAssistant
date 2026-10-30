@@ -12,7 +12,7 @@ import (
 // This is a display conversion only: stored contacts, drafts and sends keep
 // their original Unicode. ANSI sequences (including hyperlink URLs) pass intact.
 func chatDisplayText(text string) string {
-	if !strings.ContainsAny(text, "\u200d\ufe0e\ufe0f\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff") {
+	if !strings.ContainsAny(text, "\u200d\u2028\u2029\ufe0e\ufe0f\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff") {
 		return text
 	}
 	var out strings.Builder
@@ -35,6 +35,10 @@ func chatDisplayText(text string) string {
 		}
 		for _, r := range seq {
 			switch {
+			case r == '\u2028' || r == '\u2029':
+				// These separators have zero layout width but may occupy a cell
+				// in a terminal. Use a physical line break before measuring.
+				out.WriteByte('\n')
 			case r == '\ufe0e' || r == '\ufe0f':
 				// Render the base character in its terminal text presentation.
 			case r == '\u200d' && emoji:
